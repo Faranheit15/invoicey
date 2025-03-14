@@ -32,7 +32,6 @@ export default function Header() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log(user);
       if (user) {
         const storedUser = userSessionManager.user;
         if (!storedUser) {
@@ -102,7 +101,9 @@ export default function Header() {
                   <Switch aria-label="Toggle Dark Mode" />
                   🌒
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleLogout}>Logout</DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout}>
+                  Logout
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (

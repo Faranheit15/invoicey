@@ -15,6 +15,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import UserSessionManager from "@/modules/UserSessionManager";
+
+const userSessionManager = new UserSessionManager();
 
 interface InvoiceItem {
   description: string;
@@ -24,6 +27,7 @@ interface InvoiceItem {
 
 export default function CreateInvoicePage() {
   const [invoice, setInvoice] = useState({
+    userId: userSessionManager.user?.email || "",
     companyName: "",
     companyLogo: "",
     billTo: "",

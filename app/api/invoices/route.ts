@@ -26,7 +26,6 @@ export async function POST(req: NextRequest) {
   try {
     const {
       userId,
-      customerName,
       companyName,
       billTo,
       invoiceNumber,
@@ -39,7 +38,6 @@ export async function POST(req: NextRequest) {
       paymentInfo,
     }: {
       userId: string;
-      customerName: string;
       companyName: string;
       billTo: string;
       invoiceNumber: string;
@@ -54,7 +52,6 @@ export async function POST(req: NextRequest) {
 
     if (
       !userId ||
-      !customerName ||
       !companyName ||
       !billTo ||
       !invoiceNumber ||
@@ -85,7 +82,6 @@ export async function POST(req: NextRequest) {
 
     const invoice = new Invoice({
       userId,
-      customerName,
       companyName,
       billTo,
       invoiceNumber,
