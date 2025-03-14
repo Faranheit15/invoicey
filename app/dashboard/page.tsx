@@ -108,7 +108,7 @@ const DashboardPage = () => {
                   <TableRow key={invoice?._id}>
                     <TableCell>{invoice?.invoiceNumber}</TableCell>
                     <TableCell>{invoice?.companyName}</TableCell>
-                    <TableCell>${invoice?.total.toFixed(2)}</TableCell>
+                    <TableCell>₹ {invoice?.total.toFixed(2)}</TableCell>
                     <TableCell>
                       {new Date(invoice?.invoiceDate).toLocaleDateString()}
                     </TableCell>
