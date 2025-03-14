@@ -82,12 +82,6 @@ const InvoiceModal: React.FC<InvoiceModalProps> = ({ invoice, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
       <div className="relative w-full max-w-3xl p-6 bg-white rounded-lg shadow-lg">
-        {/* <button
-          className="absolute text-2xl font-bold text-gray-600 top-4 right-4 hover:text-gray-800"
-          onClick={onClose}
-        >
-          &times;
-        </button> */}
         <Cross1Icon
           className="absolute -m-2 text-2xl font-bold text-gray-600 cursor-pointer top-4 right-4 hover:text-gray-800"
           onClick={onClose}
