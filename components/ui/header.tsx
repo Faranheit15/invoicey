@@ -83,7 +83,11 @@ export default function Header() {
           <Link href="/contact" className="dark:text-white">
             Contact
           </Link>
-
+          {user && (
+            <Link href="/dashboard" className="dark:text-white">
+              My Invoices
+            </Link>
+          )}
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger>
