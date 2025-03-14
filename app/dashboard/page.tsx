@@ -73,7 +73,7 @@ const DashboardPage = () => {
   }, [router]);
 
   return (
-    <div className="container py-10 mx-auto">
+    <div className="container min-h-screen py-10 mx-auto">
       <div className="flex items-center justify-between mb-6">
         {user ? (
           <h1 className="text-3xl font-bold">
