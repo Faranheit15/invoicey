@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import UserSessionManager from "@/modules/UserSessionManager";
+import { auth } from "@/lib/firebase";
 
 const userSessionManager = new UserSessionManager();
 
@@ -78,14 +79,40 @@ export default function CreateInvoicePage() {
     return subTotal + Number(invoice.tax) + Number(invoice.convenienceCharge);
   };
 
+  // const saveInvoice = async () => {
+  //   const res = await fetch("/api/invoices", {
+  //     method: "POST",
+  //     headers: { "Content-Type": "application/json" },
+  //     body: JSON.stringify(invoice),
+  //   });
+  //   if (res.ok) {
+  //     router.push("/dashboard");
+  //   }
+  // };
   const saveInvoice = async () => {
+    // Check if the user is logged in
+    if (!auth.currentUser) {
+      console.error("User not logged in.");
+      return;
+    }
+
+    // Retrieve the Firebase ID token
+    const token = await auth.currentUser.getIdToken();
+
+    // Make the API request with the Authorization header
     const res = await fetch("/api/invoices", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify(invoice),
     });
+
     if (res.ok) {
       router.push("/dashboard");
+    } else {
+      console.error("Failed to save invoice", await res.text());
     }
   };
 

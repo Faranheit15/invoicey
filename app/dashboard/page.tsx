@@ -15,6 +15,7 @@ import {
 import UserSessionManager from "@/modules/UserSessionManager";
 import { PlusIcon, EyeOpenIcon } from "@radix-ui/react-icons";
 import InvoiceModal, { Invoice } from "@/components/InvoiceModal";
+import { auth } from "@/lib/firebase";
 
 const DashboardPage = () => {
   const [user, setUser] = useState<{ name: string } | null>(null);
@@ -46,22 +47,20 @@ const DashboardPage = () => {
   useEffect(() => {
     const fetchInvoices = async () => {
       try {
-        const sessionToken = userSessionManager.sessionToken;
-        if (!sessionToken) {
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
           router.push("/auth");
           return;
         }
-
+        const token = await currentUser.getIdToken();
         const res = await fetch("/api/invoices", {
-          headers: { Authorization: `Bearer ${sessionToken}` },
+          headers: { Authorization: `Bearer ${token}` },
         });
-
         if (!res.ok) {
-          console.error("Failed to fetch invoices");
+          console.error("Failed to fetch invoices", await res.text());
           setInvoices([]);
           return;
         }
-
         const data = await res.json();
         setInvoices(data || []);
       } catch (error) {
