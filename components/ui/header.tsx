@@ -15,6 +15,7 @@ import { auth } from "@/lib/firebase";
 import UserSessionManager from "@/modules/UserSessionManager";
 import Link from "next/link";
 import Image from "next/image";
+import { HamburgerMenuIcon, Cross1Icon } from "@radix-ui/react-icons";
 
 interface UserData {
   uid: string;
@@ -26,21 +27,22 @@ interface UserData {
 
 export default function Header() {
   const [user, setUser] = useState<UserData | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const userSessionManager = new UserSessionManager();
   const router = useRouter();
   const placeholderAvatar = "https://via.placeholder.com/40"; // Default image if no profile picture
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
         const storedUser = userSessionManager.user;
         if (!storedUser) {
-          const userData = {
-            uid: user.uid,
-            email: user.email || "",
-            name: user.displayName || "",
-            photoURL: user.photoURL || placeholderAvatar,
-            providerId: user.providerData[0]?.providerId || "unknown",
+          const userData: UserData = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            name: firebaseUser.displayName || "",
+            photoURL: firebaseUser.photoURL || placeholderAvatar,
+            providerId: firebaseUser.providerData[0]?.providerId || "unknown",
           };
           userSessionManager.user = userData;
           setUser(userData);
@@ -73,7 +75,8 @@ export default function Header() {
         <Link href="/">
           <h1 className="text-2xl font-bold dark:text-white">Invoicey</h1>
         </Link>
-        <nav className="flex items-center space-x-4">
+        {/* Desktop Navigation */}
+        <nav className="items-center hidden space-x-4 md:flex">
           <Link href="/about" className="dark:text-white">
             About
           </Link>
@@ -102,7 +105,7 @@ export default function Header() {
               <DropdownMenuContent align="end">
                 <DropdownMenuItem>
                   ☀️
-                  <Switch aria-label="Toggle Dark Mode" />
+                  <Switch aria-label="Toggle Dark Mode" className="mx-2" />
                   🌒
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout}>
@@ -116,7 +119,72 @@ export default function Header() {
             </Button>
           )}
         </nav>
+        {/* Mobile Menu Button */}
+        <div className="md:hidden">
+          <Button
+            variant="ghost"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          >
+            {mobileMenuOpen ? (
+              <Cross1Icon className="w-6 h-6" />
+            ) : (
+              <HamburgerMenuIcon className="w-6 h-6" />
+            )}
+          </Button>
+        </div>
       </div>
+      {/* Mobile Navigation */}
+      {mobileMenuOpen && (
+        <div className="bg-white shadow-md md:hidden dark:bg-gray-900">
+          <nav className="flex flex-col p-4 space-y-2">
+            <Link
+              href="/about"
+              className="dark:text-white"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              About
+            </Link>
+            <Link
+              href="/pricing"
+              className="dark:text-white"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Pricing
+            </Link>
+            <Link
+              href="/contact"
+              className="dark:text-white"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Contact
+            </Link>
+            {user && (
+              <Link
+                href="/dashboard"
+                className="dark:text-white"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                My Invoices
+              </Link>
+            )}
+            {user ? (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  handleLogout();
+                }}
+                className="text-left dark:text-white"
+              >
+                Logout
+              </button>
+            ) : (
+              <Button asChild onClick={() => setMobileMenuOpen(false)}>
+                <Link href="/auth">Get Started</Link>
+              </Button>
+            )}
+          </nav>
+        </div>
+      )}
     </header>
   );
 }
