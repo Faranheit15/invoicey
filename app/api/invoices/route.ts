@@ -3,31 +3,112 @@ import connectDB from "@/lib/mongodb";
 import Invoice from "@/models/Invoice";
 import admin from "firebase-admin";
 
-// Initialize Firebase Admin if not already initialized
-if (!admin.apps.length) {
+type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
+
+interface RawInvoiceItem {
+  description?: string;
+  name?: string;
+  quantity?: number | string;
+  unitPrice?: number | string;
+  price?: number | string;
+}
+
+interface RawInvoicePayload {
+  id?: string;
+  companyName?: string;
+  companyEmail?: string;
+  companyPhone?: string;
+  companyAddress?: string;
+  companyLogo?: string;
+  billTo?: string;
+  billToEmail?: string;
+  billToAddress?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  dueDate?: string;
+  terms?: string;
+  notes?: string;
+  currency?: string;
+  items?: RawInvoiceItem[];
+  discount?: number | string;
+  tax?: number | string;
+  convenienceCharge?: number | string;
+  paymentInfo?: string;
+  status?: InvoiceStatus;
+}
+
+interface PatchInvoicePayload {
+  id?: string;
+  action?: "settle" | "soft_delete";
+  status?: InvoiceStatus;
+}
+
+interface NormalizedInvoicePayload {
+  companyName: string;
+  companyEmail: string;
+  companyPhone: string;
+  companyAddress: string;
+  companyLogo: string;
+  billTo: string;
+  billToEmail: string;
+  billToAddress: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  terms: string;
+  notes: string;
+  currency: string;
+  items: { name: string; quantity: number; price: number }[];
+  subtotal: number;
+  discount: number;
+  tax: number;
+  convenienceCharge: number;
+  paymentInfo: string;
+  status: InvoiceStatus;
+  total: number;
+}
+
+const parseServiceAccount = () => {
   const serviceAccountStr = process.env.FIREBASE_ADMIN_CREDENTIALS;
   if (!serviceAccountStr) {
-    throw new Error("Missing FIREBASE_ADMIN_CREDENTIALS environment variable");
+    throw new Error("Missing FIREBASE_ADMIN_CREDENTIALS");
   }
-  let serviceAccount;
+
   try {
-    serviceAccount = JSON.parse(serviceAccountStr);
-  } catch (error: unknown) {
-    throw new Error("Invalid JSON format in FIREBASE_ADMIN_CREDENTIALS", {
-      cause: error,
-    });
+    return JSON.parse(serviceAccountStr);
+  } catch {
+    try {
+      const decoded = Buffer.from(serviceAccountStr, "base64").toString("utf8");
+      return JSON.parse(decoded);
+    } catch (error: unknown) {
+      throw new Error("Invalid FIREBASE_ADMIN_CREDENTIALS", { cause: error });
+    }
   }
+};
+
+const ensureFirebaseAdmin = () => {
+  if (admin.apps.length) {
+    return;
+  }
+
+  const serviceAccount = parseServiceAccount();
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
-}
+};
 
-// Helper function to verify JWT and return a non-null UID
 const verifyAuth = async (req: NextRequest): Promise<string> => {
+  try {
+    ensureFirebaseAdmin();
+  } catch (error: unknown) {
+    throw new Error("AuthConfigurationError", { cause: error });
+  }
+
   const authHeader = req.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     throw new Error("Unauthorized");
   }
+
   const token = authHeader.split("Bearer ")[1];
   try {
     const decodedToken = await admin.auth().verifyIdToken(token);
@@ -40,128 +121,332 @@ const verifyAuth = async (req: NextRequest): Promise<string> => {
   }
 };
 
+const toNumber = (value: number | string | undefined, fallback = 0): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const cleanString = (value: string | undefined): string => {
+  return typeof value === "string" ? value.trim() : "";
+};
+
+const normalizeItems = (items: RawInvoiceItem[] = []) => {
+  return items
+    .map((item) => {
+      const name = cleanString(item.description || item.name);
+      const quantity = Math.max(1, toNumber(item.quantity, 1));
+      const price = Math.max(0, toNumber(item.unitPrice ?? item.price, 0));
+      return { name, quantity, price };
+    })
+    .filter((item) => item.name.length > 0);
+};
+
+const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
+  const items = normalizeItems(raw.items || []);
+  const subtotal = Number(
+    items
+      .reduce((sum, item) => sum + item.quantity * item.price, 0)
+      .toFixed(2)
+  );
+  const discount = Number(Math.max(0, toNumber(raw.discount, 0)).toFixed(2));
+  const tax = Number(Math.max(0, toNumber(raw.tax, 0)).toFixed(2));
+  const convenienceCharge = Number(
+    Math.max(0, toNumber(raw.convenienceCharge, 0)).toFixed(2)
+  );
+  const total = Number(
+    Math.max(0, subtotal - discount + tax + convenienceCharge).toFixed(2)
+  );
+
+  const allowedStatuses: InvoiceStatus[] = ["draft", "sent", "paid", "overdue"];
+  const status =
+    raw.status && allowedStatuses.includes(raw.status) ? raw.status : "draft";
+
+  return {
+    companyName: cleanString(raw.companyName),
+    companyEmail: cleanString(raw.companyEmail),
+    companyPhone: cleanString(raw.companyPhone),
+    companyAddress: cleanString(raw.companyAddress),
+    companyLogo: cleanString(raw.companyLogo),
+    billTo: cleanString(raw.billTo),
+    billToEmail: cleanString(raw.billToEmail),
+    billToAddress: cleanString(raw.billToAddress),
+    invoiceNumber: cleanString(raw.invoiceNumber),
+    invoiceDate: cleanString(raw.invoiceDate),
+    dueDate: cleanString(raw.dueDate),
+    terms: cleanString(raw.terms),
+    notes: cleanString(raw.notes),
+    currency: cleanString(raw.currency) || "INR",
+    items,
+    subtotal,
+    discount,
+    tax,
+    convenienceCharge,
+    paymentInfo: cleanString(raw.paymentInfo),
+    status,
+    total,
+  };
+};
+
+const isValidDate = (value: string): boolean => {
+  if (!value) {
+    return false;
+  }
+  return !Number.isNaN(new Date(value).getTime());
+};
+
+const validatePayload = (payload: NormalizedInvoicePayload): string | null => {
+  if (!payload.companyName) {
+    return "Company name is required";
+  }
+  if (!payload.billTo) {
+    return "Bill to is required";
+  }
+  if (!payload.invoiceNumber) {
+    return "Invoice number is required";
+  }
+  if (!isValidDate(payload.invoiceDate)) {
+    return "Invoice date is invalid";
+  }
+  if (!isValidDate(payload.dueDate)) {
+    return "Due date is invalid";
+  }
+  if (payload.items.length === 0) {
+    return "At least one line item is required";
+  }
+  return null;
+};
+
+const isNotFoundOrInvalidIdError = (error: unknown): boolean => {
+  const err = error as { name?: string };
+  return err?.name === "CastError";
+};
+
+const allowedStatuses: InvoiceStatus[] = ["draft", "sent", "paid", "overdue"];
+
+const authErrorResponse = (error: unknown) => {
+  const err = error as Error;
+  if (err.message === "AuthConfigurationError") {
+    return NextResponse.json(
+      { error: "Server authentication is misconfigured" },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+};
+
 export async function GET(req: NextRequest) {
-  await connectDB();
   let userUid: string;
   try {
     userUid = await verifyAuth(req);
   } catch (error: unknown) {
-    const err = error as Error;
-    return NextResponse.json({ error: err.message }, { status: 401 });
+    return authErrorResponse(error);
   }
+
+  await connectDB();
 
   const { searchParams } = new URL(req.url);
   const invoiceId = searchParams.get("id");
 
-  if (invoiceId) {
-    // Fetch specific invoice by ID
-    const invoice = await Invoice.findById(invoiceId);
-    if (!invoice) {
-      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  try {
+    if (invoiceId) {
+      const invoice = await Invoice.findOne({
+        _id: invoiceId,
+        userId: userUid,
+        is_deleted: { $ne: true },
+      });
+      if (!invoice) {
+        return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+      }
+      return NextResponse.json(invoice);
     }
-    // Check if the invoice belongs to the authenticated user
-    if (invoice.userId !== userUid) {
-      return NextResponse.json(
-        { error: "Unauthorized access" },
-        { status: 403 }
-      );
-    }
-    return NextResponse.json(invoice);
-  }
 
-  // Fetch all invoices for the authenticated user
-  const invoices = await Invoice.find({ userId: userUid });
-  return NextResponse.json(invoices);
+    const invoices = await Invoice.find({
+      userId: userUid,
+      is_deleted: { $ne: true },
+    }).sort({ createdAt: -1 });
+    return NextResponse.json(invoices);
+  } catch (error: unknown) {
+    if (isNotFoundOrInvalidIdError(error)) {
+      return NextResponse.json({ error: "Invalid invoice id" }, { status: 400 });
+    }
+
+    const err = error as Error;
+    return NextResponse.json(
+      { error: "Internal Server Error", details: err.message },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
-  await connectDB();
   let userUid: string;
   try {
     userUid = await verifyAuth(req);
   } catch (error: unknown) {
-    const err = error as Error;
-    return NextResponse.json({ error: err.message }, { status: 401 });
+    return authErrorResponse(error);
   }
 
-  try {
-    const {
-      companyName,
-      billTo,
-      invoiceNumber,
-      invoiceDate,
-      dueDate,
-      terms,
-      items,
-      tax,
-      convenienceCharge,
-      paymentInfo,
-    }: {
-      companyName: string;
-      billTo: string;
-      invoiceNumber: string;
-      invoiceDate: string;
-      dueDate: string;
-      terms: string;
-      items: { description: string; quantity: number; unitPrice: number }[];
-      tax: number;
-      convenienceCharge: number;
-      paymentInfo: string;
-    } = await req.json();
+  await connectDB();
 
-    if (
-      !companyName ||
-      !billTo ||
-      !invoiceNumber ||
-      !invoiceDate ||
-      !dueDate ||
-      !items.length
-    ) {
+  try {
+    const rawPayload = (await req.json()) as RawInvoicePayload;
+    const payload = normalizePayload(rawPayload);
+    const validationError = validatePayload(payload);
+
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
+    const invoice = new Invoice({
+      userId: userUid,
+      is_deleted: false,
+      ...payload,
+    });
+
+    await invoice.save();
+    return NextResponse.json(
+      {
+        message: "Invoice created successfully",
+        invoice,
+      },
+      { status: 201 }
+    );
+  } catch (error: unknown) {
+    const err = error as Error;
+    console.error("Error creating invoice:", err.message);
+    return NextResponse.json(
+      { error: "Internal Server Error", details: err.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  let userUid: string;
+  try {
+    userUid = await verifyAuth(req);
+  } catch (error: unknown) {
+    return authErrorResponse(error);
+  }
+
+  await connectDB();
+
+  try {
+    const rawPayload = (await req.json()) as RawInvoicePayload;
+    const { searchParams } = new URL(req.url);
+    const invoiceId = searchParams.get("id") || cleanString(rawPayload.id);
+
+    if (!invoiceId) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Invoice id is required for updates" },
         { status: 400 }
       );
     }
 
-    const formattedItems = items.map((item) => ({
-      name: item.description,
-      price: item.unitPrice,
-      quantity: item.quantity,
-    }));
-
-    const total =
-      formattedItems.reduce(
-        (sum: number, item: { price: number; quantity: number }) =>
-          sum + item.price * item.quantity,
-        0
-      ) +
-      Number(tax) +
-      Number(convenienceCharge);
-
-    // Use the verified UID instead of client-sent userId
-    const invoice = new Invoice({
+    const existingInvoice = await Invoice.findOne({
+      _id: invoiceId,
       userId: userUid,
-      companyName,
-      billTo,
-      invoiceNumber,
-      invoiceDate,
-      dueDate,
-      terms,
-      items: formattedItems,
-      tax,
-      convenienceCharge,
-      paymentInfo,
-      total,
+      is_deleted: { $ne: true },
     });
+    if (!existingInvoice) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
 
-    await invoice.save();
+    const payload = normalizePayload(rawPayload);
+    const validationError = validatePayload(payload);
+
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
+    Object.assign(existingInvoice, payload);
+    await existingInvoice.save();
+
     return NextResponse.json({
-      message: "Invoice created successfully",
-      invoice,
+      message: "Invoice updated successfully",
+      invoice: existingInvoice,
     });
   } catch (error: unknown) {
+    if (isNotFoundOrInvalidIdError(error)) {
+      return NextResponse.json({ error: "Invalid invoice id" }, { status: 400 });
+    }
+
     const err = error as Error;
-    console.error("Error creating invoice:", err.message);
+    console.error("Error updating invoice:", err.message);
+    return NextResponse.json(
+      { error: "Internal Server Error", details: err.message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  let userUid: string;
+  try {
+    userUid = await verifyAuth(req);
+  } catch (error: unknown) {
+    return authErrorResponse(error);
+  }
+
+  await connectDB();
+
+  try {
+    const rawPayload = (await req.json()) as PatchInvoicePayload;
+    const { searchParams } = new URL(req.url);
+    const invoiceId = searchParams.get("id") || cleanString(rawPayload.id);
+
+    if (!invoiceId) {
+      return NextResponse.json(
+        { error: "Invoice id is required" },
+        { status: 400 }
+      );
+    }
+
+    const invoice = await Invoice.findOne({
+      _id: invoiceId,
+      userId: userUid,
+      is_deleted: { $ne: true },
+    });
+
+    if (!invoice) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
+    if (rawPayload.action === "soft_delete") {
+      invoice.is_deleted = true;
+      await invoice.save();
+      return NextResponse.json({ message: "Invoice deleted successfully" });
+    }
+
+    if (rawPayload.action === "settle") {
+      invoice.status = "paid";
+      await invoice.save();
+      return NextResponse.json({
+        message: "Invoice settled successfully",
+        invoice,
+      });
+    }
+
+    if (rawPayload.status && allowedStatuses.includes(rawPayload.status)) {
+      invoice.status = rawPayload.status;
+      await invoice.save();
+      return NextResponse.json({
+        message: "Invoice status updated successfully",
+        invoice,
+      });
+    }
+
+    return NextResponse.json(
+      { error: "No valid patch action provided" },
+      { status: 400 }
+    );
+  } catch (error: unknown) {
+    if (isNotFoundOrInvalidIdError(error)) {
+      return NextResponse.json({ error: "Invalid invoice id" }, { status: 400 });
+    }
+
+    const err = error as Error;
     return NextResponse.json(
       { error: "Internal Server Error", details: err.message },
       { status: 500 }

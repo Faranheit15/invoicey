@@ -1,21 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Switch } from "@/components/ui/switch";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import UserSessionManager from "@/modules/UserSessionManager";
-import Link from "next/link";
-import Image from "next/image";
-import { HamburgerMenuIcon, Cross1Icon } from "@radix-ui/react-icons";
+import { Button } from "@/components/ui/button";
+import {
+  Cross1Icon,
+  HamburgerMenuIcon,
+  RocketIcon,
+} from "@radix-ui/react-icons";
 
 interface UserData {
   uid: string;
@@ -25,30 +22,40 @@ interface UserData {
   providerId: string;
 }
 
+const fallbackAvatar = "https://via.placeholder.com/40";
+
+const navLinks = [
+  { href: "/about", label: "About" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/contact", label: "Contact" },
+];
+
 export default function Header() {
   const [user, setUser] = useState<UserData | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const userSessionManager = new UserSessionManager();
   const router = useRouter();
-  const placeholderAvatar = "https://via.placeholder.com/40"; // Default image if no profile picture
 
   useEffect(() => {
+    const userSessionManager = new UserSessionManager();
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         const storedUser = userSessionManager.user;
-        if (!storedUser) {
-          const userData: UserData = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || "",
-            name: firebaseUser.displayName || "",
-            photoURL: firebaseUser.photoURL || placeholderAvatar,
-            providerId: firebaseUser.providerData[0]?.providerId || "unknown",
-          };
-          userSessionManager.user = userData;
-          setUser(userData);
-        } else {
+        if (storedUser) {
           setUser(storedUser);
+          return;
         }
+
+        const normalizedUser: UserData = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || "",
+          name: firebaseUser.displayName || "User",
+          photoURL: firebaseUser.photoURL || fallbackAvatar,
+          providerId: firebaseUser.providerData[0]?.providerId || "unknown",
+        };
+
+        userSessionManager.user = normalizedUser;
+        setUser(normalizedUser);
       } else {
         userSessionManager.clearLocal();
         setUser(null);
@@ -58,125 +65,118 @@ export default function Header() {
     return () => unsubscribe();
   }, []);
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      userSessionManager.clearLocal();
-      setUser(null);
-      router.push("/auth");
-    } catch (error) {
-      console.error("Error signing out:", error);
-    }
+  const logout = async () => {
+    const userSessionManager = new UserSessionManager();
+    await signOut(auth);
+    userSessionManager.clearLocal();
+    setUser(null);
+    router.push("/auth");
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-white shadow-md dark:bg-gray-900">
-      <div className="container flex items-center justify-between p-4 mx-auto">
-        <Link href="/">
-          <h1 className="text-2xl font-bold dark:text-white">Invoicey</h1>
+    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur-md">
+      <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-10">
+        <Link href="/" className="inline-flex items-center gap-2">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white">
+            <RocketIcon className="w-4 h-4" />
+          </span>
+          <div>
+            <p className="text-base font-semibold text-slate-900">Invoicey</p>
+            <p className="text-[11px] uppercase tracking-wider text-slate-500">
+              Billing OS
+            </p>
+          </div>
         </Link>
-        {/* Desktop Navigation */}
-        <nav className="items-center hidden space-x-4 md:flex">
-          <Link href="/about" className="dark:text-white">
-            About
-          </Link>
-          <Link href="/pricing" className="dark:text-white">
-            Pricing
-          </Link>
-          <Link href="/contact" className="dark:text-white">
-            Contact
-          </Link>
-          {user && (
-            <Link href="/dashboard" className="dark:text-white">
-              My Invoices
+
+        <nav className="hidden items-center gap-5 text-sm text-slate-600 md:flex">
+          {navLinks.map((link) => (
+            <Link key={link.href} href={link.href} className="hover:text-slate-900">
+              {link.label}
             </Link>
-          )}
+          ))}
           {user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger>
+            <Link href="/dashboard" className="hover:text-slate-900">
+              Dashboard
+            </Link>
+          ) : null}
+        </nav>
+
+        <div className="hidden items-center gap-3 md:flex">
+          {user ? (
+            <>
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard")}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-1 text-left hover:border-slate-300"
+              >
                 <Image
-                  src={user.photoURL || placeholderAvatar}
-                  alt={user.name}
-                  width={40}
-                  height={40}
-                  className="w-10 h-10 rounded-full cursor-pointer"
+                  src={user.photoURL || fallbackAvatar}
+                  alt={user.name || "User avatar"}
+                  width={28}
+                  height={28}
+                  className="h-7 w-7 rounded-full"
                 />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem>
-                  ☀️
-                  <Switch aria-label="Toggle Dark Mode" className="mx-2" />
-                  🌒
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleLogout}>
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                <span className="pr-2 text-sm text-slate-700">{user.name}</span>
+              </button>
+              <Button variant="outline" onClick={logout}>
+                Logout
+              </Button>
+            </>
           ) : (
             <Button asChild>
               <Link href="/auth">Get Started</Link>
             </Button>
           )}
-        </nav>
-        {/* Mobile Menu Button */}
-        <div className="md:hidden">
-          <Button
-            variant="ghost"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          >
-            {mobileMenuOpen ? (
-              <Cross1Icon className="w-6 h-6" />
-            ) : (
-              <HamburgerMenuIcon className="w-6 h-6" />
-            )}
-          </Button>
         </div>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="md:hidden"
+          onClick={() => setMobileMenuOpen((open) => !open)}
+          aria-label="Toggle menu"
+        >
+          {mobileMenuOpen ? (
+            <Cross1Icon className="w-4 h-4" />
+          ) : (
+            <HamburgerMenuIcon className="w-4 h-4" />
+          )}
+        </Button>
       </div>
-      {/* Mobile Navigation */}
-      {mobileMenuOpen && (
-        <div className="bg-white shadow-md md:hidden dark:bg-gray-900">
-          <nav className="flex flex-col p-4 space-y-2">
-            <Link
-              href="/about"
-              className="dark:text-white"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              About
-            </Link>
-            <Link
-              href="/pricing"
-              className="dark:text-white"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Pricing
-            </Link>
-            <Link
-              href="/contact"
-              className="dark:text-white"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Contact
-            </Link>
-            {user && (
+
+      {mobileMenuOpen ? (
+        <div className="border-t border-slate-200 bg-white px-4 py-3 md:hidden">
+          <nav className="flex flex-col gap-2 text-sm text-slate-700">
+            {navLinks.map((link) => (
               <Link
-                href="/dashboard"
-                className="dark:text-white"
+                key={link.href}
+                href={link.href}
                 onClick={() => setMobileMenuOpen(false)}
+                className="rounded-md px-2 py-1 hover:bg-slate-100"
               >
-                My Invoices
+                {link.label}
               </Link>
-            )}
+            ))}
             {user ? (
-              <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  handleLogout();
-                }}
-                className="text-left dark:text-white"
-              >
-                Logout
-              </button>
+              <>
+                <Link
+                  href="/dashboard"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-md px-2 py-1 hover:bg-slate-100"
+                >
+                  Dashboard
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    logout();
+                  }}
+                  className="rounded-md px-2 py-1 text-left hover:bg-slate-100"
+                >
+                  Logout
+                </button>
+              </>
             ) : (
               <Button asChild onClick={() => setMobileMenuOpen(false)}>
                 <Link href="/auth">Get Started</Link>
@@ -184,7 +184,7 @@ export default function Header() {
             )}
           </nav>
         </div>
-      )}
+      ) : null}
     </header>
   );
 }

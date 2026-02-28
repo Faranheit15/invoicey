@@ -1,11 +1,213 @@
-import Hero from "@/components/ui/hero";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { BentoGrid, BentoGridItem } from "@/components/ui/aceternity/bento-grid";
+import { GridBackground } from "@/components/ui/aceternity/grid-background";
+import { Spotlight } from "@/components/ui/aceternity/spotlight";
+import {
+  ArrowRightIcon,
+  CheckCircledIcon,
+  LightningBoltIcon,
+  RocketIcon,
+  PersonIcon,
+  StarIcon,
+  DownloadIcon,
+} from "@radix-ui/react-icons";
+
+const featureCards = [
+  {
+    title: "Invoice Studio",
+    description:
+      "Create polished invoices with line items, discount, tax, payment notes, and complete business details.",
+    eyebrow: "Builder",
+    icon: <CheckCircledIcon className="w-5 h-5" />,
+    className: "lg:col-span-2",
+  },
+  {
+    title: "One-Click Export",
+    description:
+      "Export invoice documents as PDF-ready print, HTML, CSV, or JSON without extra tooling.",
+    eyebrow: "Exports",
+    icon: <DownloadIcon className="w-5 h-5" />,
+    className: "lg:col-span-1",
+  },
+  {
+    title: "Client-Ready Design",
+    description:
+      "Professional invoice templates inspired by production-grade billing flows.",
+    eyebrow: "Presentation",
+    icon: <StarIcon className="w-5 h-5" />,
+    className: "lg:col-span-1",
+  },
+  {
+    title: "Dashboard + Edit Flow",
+    description:
+      "Track statuses, reopen any invoice, update details, and re-export in seconds.",
+    eyebrow: "Ops",
+    icon: <RocketIcon className="w-5 h-5" />,
+    className: "lg:col-span-2",
+  },
+];
+
+const quips = [
+  "Not backed by Y Combinator (yet).",
+  "Not backend by YCombinator either.",
+  "Backed by strong coffee and strict TypeScript.",
+  "No hidden button for \"contact enterprise\".",
+];
 
 export default function LandingPage() {
   return (
-    <div className="flex flex-col min-h-screen">
-      <main className="flex-grow">
-        <Hero />
-      </main>
-    </div>
+    <main className="relative overflow-hidden bg-slate-950 text-slate-100">
+      <Spotlight
+        className="-top-48 left-1/2 h-[34rem] w-[34rem] -translate-x-1/2 opacity-60"
+        fill="#0EA5E9"
+      />
+      <Spotlight
+        className="-left-32 top-56 h-[24rem] w-[24rem] opacity-40"
+        fill="#F97316"
+      />
+      <Spotlight
+        className="-right-32 bottom-20 h-[26rem] w-[26rem] opacity-35"
+        fill="#38BDF8"
+      />
+      <GridBackground className="opacity-70" />
+
+      <section className="relative px-4 pt-16 pb-14 sm:px-6 sm:pt-20 lg:px-10 lg:pt-24">
+        <div className="mx-auto grid w-full max-w-7xl items-start gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:gap-14">
+          <div>
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+              <RocketIcon className="h-3.5 w-3.5" />
+              Invoicey
+            </span>
+
+            <h1 className="mt-5 text-balance text-4xl font-semibold leading-[1.05] text-white sm:text-5xl lg:text-6xl">
+              Build serious invoices fast, free and hassle-free.
+            </h1>
+
+            <p className="mt-5 max-w-2xl text-pretty text-base leading-relaxed text-slate-300 sm:text-lg">
+              Build invoices that look industry-grade, edit them anytime, and export in multiple formats your clients already trust.
+            </p>
+
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              <Button
+                asChild
+                size="lg"
+                className="bg-white text-slate-900 hover:bg-slate-100"
+              >
+                <Link href="/auth" className="inline-flex items-center gap-2">
+                  Start Free
+                  <ArrowRightIcon className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button
+                asChild
+                size="lg"
+                variant="outline"
+                className="border-white/25 bg-white/5 text-white hover:bg-white/10"
+              >
+                <Link href="/dashboard">Go to Dashboard</Link>
+              </Button>
+            </div>
+
+            <ul className="mt-8 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+              {quips.map((quip) => (
+                <li key={quip} className="rounded-lg bg-white/[0.03] px-3 py-2">
+                  {quip}
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-8 flex flex-wrap items-center gap-5 text-sm text-slate-300">
+              <div className="flex items-center gap-2">
+                <PersonIcon className="h-4 w-4" />
+                <span>Solo founders to small teams</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <LightningBoltIcon className="h-4 w-4" />
+                <span>Fast setup, no enterprise maze</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative lg:pt-4">
+            <div className="absolute -inset-0.5 rounded-3xl bg-[conic-gradient(from_120deg,_rgba(56,189,248,0.75),rgba(249,115,22,0.4),rgba(59,130,246,0.75),rgba(56,189,248,0.75))] opacity-75 blur" />
+            <div className="relative overflow-hidden rounded-3xl border border-white/15 bg-slate-900/85 p-5 shadow-[0_30px_80px_rgba(2,6,23,0.55)] sm:p-6">
+              <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                    Preview
+                  </p>
+                  <h2 className="mt-1 text-2xl font-semibold text-white">INV-849231</h2>
+                </div>
+                <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-200">
+                  Paid
+                </span>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-4 text-sm text-slate-200">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-slate-400">Client</p>
+                  <p className="mt-1 font-medium text-white">Acme Manufacturing</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] uppercase tracking-wider text-slate-400">Total</p>
+                  <p className="mt-1 text-xl font-semibold text-white">₹2,48,400</p>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-2 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+                <div className="flex justify-between text-slate-200">
+                  <span>Development Sprint</span>
+                  <span>₹1,80,000</span>
+                </div>
+                <div className="flex justify-between text-slate-200">
+                  <span>Support Retainer</span>
+                  <span>₹45,000</span>
+                </div>
+                <div className="flex justify-between text-slate-200">
+                  <span>Taxes + charges</span>
+                  <span>₹23,400</span>
+                </div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-3 text-[11px] text-slate-300">
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                  Export: PDF / HTML / CSV / JSON
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-right">
+                  Edit anytime from dashboard
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="relative px-4 pb-16 sm:px-6 lg:px-10 lg:pb-20">
+        <div className="mx-auto w-full max-w-7xl">
+          <div className="mb-6 max-w-2xl">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              Product Surface
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold text-white sm:text-3xl">
+              Designed to feel like a real product, not a toy generator.
+            </h2>
+          </div>
+
+          <BentoGrid>
+            {featureCards.map((feature) => (
+              <BentoGridItem
+                key={feature.title}
+                className={feature.className}
+                title={feature.title}
+                description={feature.description}
+                eyebrow={feature.eyebrow}
+                icon={feature.icon}
+              />
+            ))}
+          </BentoGrid>
+        </div>
+      </section>
+    </main>
   );
 }
