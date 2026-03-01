@@ -22,6 +22,24 @@ const toLineBreaks = (value: string | undefined) => {
   return toSafeValue(value).replaceAll("\n", "<br />");
 };
 
+const toSafeImageUrl = (value: string | undefined) => {
+  const trimmed = value?.trim() || "";
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const allowedProtocols = ["http:", "https:", "data:"];
+    if (!allowedProtocols.includes(parsed.protocol)) {
+      return "";
+    }
+    return escapeHtml(trimmed);
+  } catch {
+    return "";
+  }
+};
+
 interface CreateInvoiceHtmlOptions {
   autoPrint?: boolean;
 }
@@ -39,6 +57,7 @@ export const createInvoiceHtml = (
   const total = invoice.total || subtotal - discount + tax + convenienceCharge;
   const status = getInvoiceStatus(invoice).toUpperCase();
   const currency = invoice.currency || "INR";
+  const logoUrl = toSafeImageUrl(invoice.companyLogo);
 
   const rows = invoice.items
     .map((item, index) => {
@@ -101,6 +120,23 @@ export const createInvoiceHtml = (
         margin: 0;
         font-size: 28px;
         letter-spacing: 0.04em;
+      }
+
+      .brand-wrap {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+      }
+
+      .brand-logo {
+        width: 54px;
+        height: 54px;
+        border-radius: 10px;
+        border: 1px solid #d1d5db;
+        object-fit: contain;
+        padding: 6px;
+        background: #ffffff;
+        flex-shrink: 0;
       }
 
       .brand p {
@@ -266,15 +302,22 @@ export const createInvoiceHtml = (
   <body>
     <article class="sheet">
       <section class="header">
-        <div class="brand">
-          <h1>INVOICE</h1>
-          <p>
-            <strong>${toSafeValue(invoice.companyName)}</strong><br />
-            ${toLineBreaks(invoice.companyAddress)}<br />
-            ${toSafeValue(invoice.companyEmail)}${
+        <div class="brand-wrap">
+          ${
+            logoUrl
+              ? `<img src="${logoUrl}" alt="Company logo" class="brand-logo" />`
+              : ""
+          }
+          <div class="brand">
+            <h1>INVOICE</h1>
+            <p>
+              <strong>${toSafeValue(invoice.companyName)}</strong><br />
+              ${toLineBreaks(invoice.companyAddress)}<br />
+              ${toSafeValue(invoice.companyEmail)}${
     invoice.companyPhone ? ` · ${toSafeValue(invoice.companyPhone)}` : ""
   }
-          </p>
+            </p>
+          </div>
         </div>
         <div class="meta">
           <div class="label">Invoice Number</div>

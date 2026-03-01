@@ -30,7 +30,7 @@ const pillars = [
 
 export default function AboutPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-14 text-slate-100 sm:px-6 lg:px-10">
+    <main className="relative min-h-screen overflow-hidden bg-slate-100 px-4 py-14 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-10">
       <Spotlight
         className="-top-40 left-1/2 h-[30rem] w-[30rem] -translate-x-1/2 opacity-60"
         fill="#0EA5E9"
@@ -43,14 +43,14 @@ export default function AboutPage() {
 
       <section className="relative mx-auto max-w-6xl space-y-10">
         <div className="max-w-3xl">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:border-white/15 dark:bg-white/10 dark:text-sky-100">
             <RocketIcon className="h-3.5 w-3.5" />
             About Invoicey
           </span>
-          <h1 className="mt-4 text-4xl font-semibold leading-tight text-white sm:text-5xl">
+          <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-900 dark:text-white sm:text-5xl">
             A practical billing workspace for people shipping real work.
           </h1>
-          <p className="mt-4 text-base leading-relaxed text-slate-300 sm:text-lg">
+          <p className="mt-4 text-base leading-relaxed text-slate-600 dark:text-slate-300 sm:text-lg">
             Invoicey was created for founders, freelancers, and teams who need
             clean invoices without bloated accounting software. The product keeps
             the workflow focused: create, edit, track, and export.
@@ -61,16 +61,16 @@ export default function AboutPage() {
           {pillars.map((pillar) => (
             <Card
               key={pillar.title}
-              className="border-white/10 bg-slate-900/75 text-slate-100 backdrop-blur"
+              className="border-slate-200 bg-white/85 text-slate-900 backdrop-blur dark:border-white/10 dark:bg-slate-900/75 dark:text-slate-100"
             >
               <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-lg text-white">
+                <CardTitle className="flex items-center gap-2 text-lg text-slate-900 dark:text-white">
                   {pillar.icon}
                   {pillar.title}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm leading-relaxed text-slate-300">
+                <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                   {pillar.description}
                 </p>
               </CardContent>

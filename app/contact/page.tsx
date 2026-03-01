@@ -32,7 +32,7 @@ const contactLinks = [
 
 export default function ContactPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-14 text-slate-100 sm:px-6 lg:px-10">
+    <main className="relative min-h-screen overflow-hidden bg-slate-100 px-4 py-14 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-10">
       <Spotlight
         className="-top-40 left-1/2 h-[30rem] w-[30rem] -translate-x-1/2 opacity-58"
         fill="#0EA5E9"
@@ -45,14 +45,14 @@ export default function ContactPage() {
 
       <section className="relative mx-auto max-w-5xl">
         <div className="mx-auto max-w-2xl text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:border-white/15 dark:bg-white/10 dark:text-sky-100">
             <RocketIcon className="h-3.5 w-3.5" />
             Contact
           </span>
-          <h1 className="mt-4 text-4xl font-semibold leading-tight text-white sm:text-5xl">
+          <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-900 dark:text-white sm:text-5xl">
             Reach out and follow the product journey.
           </h1>
-          <p className="mt-4 text-base leading-relaxed text-slate-300 sm:text-lg">
+          <p className="mt-4 text-base leading-relaxed text-slate-600 dark:text-slate-300 sm:text-lg">
             The fastest way to connect is through the channels below.
           </p>
         </div>
@@ -61,21 +61,21 @@ export default function ContactPage() {
           {contactLinks.map((link) => (
             <Card
               key={link.label}
-              className="border-white/15 bg-slate-900/80 text-slate-100 backdrop-blur"
+              className="border-slate-200 bg-white/90 text-slate-900 backdrop-blur dark:border-white/15 dark:bg-slate-900/80 dark:text-slate-100"
             >
               <CardHeader className="space-y-2 pb-3">
-                <CardTitle className="flex items-center gap-2 text-lg text-white">
+                <CardTitle className="flex items-center gap-2 text-lg text-slate-900 dark:text-white">
                   {link.icon}
                   {link.label}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <p className="text-sm leading-relaxed text-slate-300">
+                <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                   {link.description}
                 </p>
                 <Link
                   href={link.href}
-                  className="inline-flex rounded-md border border-white/25 bg-white/5 px-3 py-2 text-sm font-medium text-white transition hover:bg-white/10"
+                  className="inline-flex rounded-md border border-slate-300 bg-white/70 px-3 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-100 dark:border-white/25 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
                 >
                   Open {link.label}
                 </Link>

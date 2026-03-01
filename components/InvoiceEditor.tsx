@@ -50,6 +50,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const authRedirectPath = useMemo(() => {
     if (mode === "edit" && invoiceId) {
       return `/auth?next=${encodeURIComponent(`/create-invoice/${invoiceId}`)}`;
@@ -117,6 +118,10 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
 
     fetchInvoice();
   }, [authRedirectPath, invoiceId, mode, router]);
+
+  useEffect(() => {
+    setLogoLoadFailed(false);
+  }, [invoice.companyLogo]);
 
   const updateField = <K extends keyof InvoiceFormState>(
     key: K,
@@ -242,12 +247,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   };
 
   const previewItems = invoice.items.filter((item) => item.description.trim());
+  const showCompanyLogo = Boolean(invoice.companyLogo.trim()) && !logoLoadFailed;
 
   if (isLoadingInvoice) {
     return (
-      <div className="flex items-center justify-center min-h-screen px-4 bg-slate-50">
-        <Card className="w-full max-w-md border-slate-200">
-          <CardContent className="flex items-center gap-3 p-6 text-slate-700">
+      <div className="flex items-center justify-center min-h-screen px-4 bg-slate-50 dark:bg-slate-950">
+        <Card className="w-full max-w-md border-slate-200 dark:border-slate-700">
+          <CardContent className="flex items-center gap-3 p-6 text-slate-700 dark:text-slate-200">
             <ReloadIcon className="w-4 h-4 animate-spin" />
             Loading invoice...
           </CardContent>
@@ -257,22 +263,22 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   }
 
   return (
-    <main className="min-h-screen px-4 py-8 bg-gradient-to-b from-slate-100 via-slate-50 to-white sm:px-6 lg:px-10">
+    <main className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white px-4 py-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <button
-              className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
+              className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
               onClick={() => router.push("/dashboard")}
               type="button"
             >
               <ArrowLeftIcon className="w-4 h-4" />
               Back to dashboard
             </button>
-            <h1 className="mt-2 text-3xl font-semibold text-slate-900">
+            <h1 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-slate-100">
               {mode === "edit" ? "Edit Invoice" : "Create Invoice"}
             </h1>
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
               Build polished invoices with complete business and payment details.
             </p>
           </div>
@@ -306,19 +312,21 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
         </div>
 
         {error ? (
-          <div className="px-4 py-3 mb-4 text-sm border rounded-md border-rose-200 bg-rose-50 text-rose-700">
+          <div className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/15 dark:text-rose-200">
             {error}
           </div>
         ) : null}
 
         <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-          <Card className="border-slate-200 shadow-sm">
+          <Card className="border-slate-200 shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <CardHeader className="pb-3">
-              <CardTitle className="text-xl text-slate-900">Invoice Details</CardTitle>
+              <CardTitle className="text-xl text-slate-900 dark:text-slate-100">
+                Invoice Details
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-7">
               <section className="space-y-3">
-                <h2 className="text-xs font-semibold tracking-wider uppercase text-slate-500">
+                <h2 className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
                   Seller
                 </h2>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -352,7 +360,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               </section>
 
               <section className="space-y-3">
-                <h2 className="text-xs font-semibold tracking-wider uppercase text-slate-500">
+                <h2 className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
                   Client
                 </h2>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -376,7 +384,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               </section>
 
               <section className="space-y-3">
-                <h2 className="text-xs font-semibold tracking-wider uppercase text-slate-500">
+                <h2 className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
                   Meta
                 </h2>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -398,7 +406,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     onChange={(event) => updateField("dueDate", event.target.value)}
                   />
                   <select
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900 dark:text-slate-100"
                     value={invoice.currency}
                     onChange={(event) => updateField("currency", event.target.value)}
                   >
@@ -409,7 +417,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     ))}
                   </select>
                   <select
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900 dark:text-slate-100"
                     value={invoice.status}
                     onChange={(event) =>
                       updateField("status", event.target.value as InvoiceStatus)
@@ -430,7 +438,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
 
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xs font-semibold tracking-wider uppercase text-slate-500">
+                  <h2 className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
                     Line Items
                   </h2>
                   <Button size="sm" variant="outline" onClick={addItem}>
@@ -438,9 +446,9 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     Add Item
                   </Button>
                 </div>
-                <div className="overflow-x-auto border rounded-md border-slate-200">
+                <div className="overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700">
                   <div className="hidden md:block">
-                    <div className="grid min-w-[680px] grid-cols-[1.6fr_120px_150px_140px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <div className="grid min-w-[680px] grid-cols-[1.6fr_120px_150px_140px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                       <div>Description</div>
                       <div>Qty</div>
                       <div>Unit Price</div>
@@ -488,7 +496,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                             }
                             placeholder="0.00"
                           />
-                          <div className="text-sm font-medium text-right text-slate-700">
+                          <div className="text-sm font-medium text-right text-slate-700 dark:text-slate-200">
                             {formatCurrency(
                               Math.max(0, item.quantity) * Math.max(0, item.unitPrice),
                               invoice.currency
@@ -501,7 +509,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                             disabled={invoice.items.length === 1}
                             aria-label="Remove item"
                           >
-                            <TrashIcon className="w-4 h-4 text-slate-500" />
+                            <TrashIcon className="w-4 h-4 text-slate-500 dark:text-slate-300" />
                           </Button>
                         </div>
                       ))}
@@ -511,7 +519,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   <div className="space-y-3 p-3 md:hidden">
                     {invoice.items.map((item, index) => (
                       <div
-                        className="rounded-lg border border-slate-200 bg-slate-50/70 p-3"
+                        className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-800/80"
                         key={`item-mobile-${index}`}
                       >
                         <div className="space-y-2">
@@ -554,8 +562,8 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                           </div>
                         </div>
                         <div className="mt-3 flex items-center justify-between text-sm">
-                          <span className="text-slate-500">Amount</span>
-                          <span className="font-semibold text-slate-700">
+                          <span className="text-slate-500 dark:text-slate-300">Amount</span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-100">
                             {formatCurrency(
                               Math.max(0, item.quantity) * Math.max(0, item.unitPrice),
                               invoice.currency
@@ -570,7 +578,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                             disabled={invoice.items.length === 1}
                             aria-label="Remove item"
                           >
-                            <TrashIcon className="w-4 h-4 text-slate-500" />
+                            <TrashIcon className="w-4 h-4 text-slate-500 dark:text-slate-300" />
                             Remove
                           </Button>
                         </div>
@@ -637,12 +645,14 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 shadow-sm xl:sticky xl:top-24 xl:h-fit">
-            <CardHeader className="pb-3 border-b border-slate-200">
-              <CardTitle className="text-xl text-slate-900">Live Preview</CardTitle>
+          <Card className="border-slate-200 shadow-sm dark:border-slate-700 dark:bg-slate-900 xl:sticky xl:top-24 xl:h-fit">
+            <CardHeader className="border-b border-slate-200 pb-3 dark:border-slate-700">
+              <CardTitle className="text-xl text-slate-900 dark:text-slate-100">
+                Live Preview
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="p-5 border-b border-slate-200 bg-slate-900 text-slate-100">
+              <div className="border-b border-slate-200 bg-slate-900 p-5 text-slate-100 dark:border-slate-700">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs tracking-[0.2em] uppercase text-slate-300">
@@ -652,6 +662,14 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       {invoice.invoiceNumber || "INV-XXXXXX"}
                     </p>
                   </div>
+                  {showCompanyLogo ? (
+                    <img
+                      src={invoice.companyLogo}
+                      alt={`${invoice.companyName || "Company"} logo`}
+                      className="h-12 w-12 rounded-md border border-white/20 bg-white/10 object-contain p-1"
+                      onError={() => setLogoLoadFailed(true)}
+                    />
+                  ) : null}
                   <span
                     className={`rounded-full px-3 py-1 text-xs font-semibold uppercase ${statusClassName[invoice.status]}`}
                   >
@@ -663,63 +681,65 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               <div className="space-y-5 p-5">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">
+                    <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
                       Bill From
                     </p>
-                    <p className="mt-1 text-sm font-semibold text-slate-800">
+                    <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
                       {invoice.companyName || "Your Company"}
                     </p>
-                    <p className="text-xs leading-relaxed whitespace-pre-line text-slate-600">
+                    <p className="text-xs leading-relaxed whitespace-pre-line text-slate-600 dark:text-slate-300">
                       {invoice.companyAddress || "Company address"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold tracking-wider uppercase text-slate-500">
+                    <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
                       Bill To
                     </p>
-                    <p className="mt-1 text-sm font-semibold text-slate-800">
+                    <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
                       {invoice.billTo || "Client name"}
                     </p>
-                    <p className="text-xs leading-relaxed whitespace-pre-line text-slate-600">
+                    <p className="text-xs leading-relaxed whitespace-pre-line text-slate-600 dark:text-slate-300">
                       {invoice.billToAddress || "Client address"}
                     </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="p-3 border rounded-md border-slate-200 bg-slate-50">
-                    <p className="text-slate-500">Invoice Date</p>
-                    <p className="font-medium text-slate-800">
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+                    <p className="text-slate-500 dark:text-slate-300">Invoice Date</p>
+                    <p className="font-medium text-slate-800 dark:text-slate-100">
                       {invoice.invoiceDate
                         ? formatDateLong(invoice.invoiceDate)
                         : "Select date"}
                     </p>
                   </div>
-                  <div className="p-3 border rounded-md border-slate-200 bg-slate-50">
-                    <p className="text-slate-500">Due Date</p>
-                    <p className="font-medium text-slate-800">
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+                    <p className="text-slate-500 dark:text-slate-300">Due Date</p>
+                    <p className="font-medium text-slate-800 dark:text-slate-100">
                       {invoice.dueDate ? formatDateLong(invoice.dueDate) : "Select date"}
                     </p>
                   </div>
                 </div>
 
-                <div className="overflow-hidden border rounded-md border-slate-200">
-                  <div className="grid grid-cols-[1.5fr_70px_100px] bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
+                  <div className="grid grid-cols-[1.5fr_70px_100px] bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                     <div>Item</div>
                     <div className="text-right">Qty</div>
                     <div className="text-right">Amount</div>
                   </div>
-                  <div className="divide-y divide-slate-100">
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
                     {(previewItems.length ? previewItems : invoice.items).map((item, index) => (
                       <div
                         className="grid grid-cols-[1.5fr_70px_100px] px-3 py-2 text-sm"
                         key={`${item.description}-${index}`}
                       >
-                        <div className="truncate text-slate-700">
+                        <div className="truncate text-slate-700 dark:text-slate-200">
                           {item.description || "Untitled item"}
                         </div>
-                        <div className="text-right text-slate-500">{item.quantity}</div>
-                        <div className="font-medium text-right text-slate-700">
+                        <div className="text-right text-slate-500 dark:text-slate-300">
+                          {item.quantity}
+                        </div>
+                        <div className="font-medium text-right text-slate-700 dark:text-slate-100">
                           {formatCurrency(item.quantity * item.unitPrice, invoice.currency)}
                         </div>
                       </div>
@@ -728,23 +748,23 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 </div>
 
                 <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between text-slate-600">
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
                     <span>Subtotal</span>
                     <span>{formatCurrency(totals.subtotal, invoice.currency)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-600">
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
                     <span>Discount</span>
                     <span>- {formatCurrency(totals.discount, invoice.currency)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-600">
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
                     <span>Tax</span>
                     <span>{formatCurrency(totals.tax, invoice.currency)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-600">
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
                     <span>Service Charge</span>
                     <span>{formatCurrency(totals.convenienceCharge, invoice.currency)}</span>
                   </div>
-                  <div className="flex items-center justify-between pt-2 text-base font-semibold border-t border-slate-200 text-slate-900">
+                  <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-base font-semibold text-slate-900 dark:border-slate-700 dark:text-slate-100">
                     <span>Total</span>
                     <span>{formatCurrency(totals.total, invoice.currency)}</span>
                   </div>

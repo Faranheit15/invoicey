@@ -29,10 +29,12 @@ import InvoiceModal from "@/components/InvoiceModal";
 import UserSessionManager from "@/modules/UserSessionManager";
 
 const statusClassName = {
-  draft: "bg-slate-100 text-slate-700",
-  sent: "bg-blue-100 text-blue-700",
-  paid: "bg-emerald-100 text-emerald-700",
-  overdue: "bg-rose-100 text-rose-700",
+  draft:
+    "bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200",
+  sent: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200",
+  paid:
+    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/45 dark:text-emerald-200",
+  overdue: "bg-rose-100 text-rose-700 dark:bg-rose-900/45 dark:text-rose-200",
 };
 
 export default function DashboardPage() {
@@ -186,15 +188,15 @@ export default function DashboardPage() {
   }, [invoices]);
 
   return (
-    <main className="min-h-screen px-4 py-8 bg-gradient-to-b from-slate-100 via-slate-50 to-white sm:px-6 lg:px-10">
+    <main className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white px-4 py-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 sm:px-6 lg:px-10">
       <div className="mx-auto space-y-6 max-w-7xl">
         <section className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold text-slate-900">
+            <h1 className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
               {greeting}
               {user?.name ? `, ${user.name}` : ""}
             </h1>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
               Manage, review, edit, and export all your invoices from one place.
             </p>
           </div>
@@ -205,39 +207,49 @@ export default function DashboardPage() {
         </section>
 
         <section className="grid gap-4 md:grid-cols-3">
-          <Card className="border-slate-200">
+          <Card className="border-slate-200 dark:border-slate-700 dark:bg-slate-900">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-slate-500">Total Invoices</CardTitle>
+              <CardTitle className="text-sm text-slate-500 dark:text-slate-300">
+                Total Invoices
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-semibold text-slate-900">{summary.count}</p>
+              <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
+                {summary.count}
+              </p>
             </CardContent>
           </Card>
-          <Card className="border-slate-200">
+          <Card className="border-slate-200 dark:border-slate-700 dark:bg-slate-900">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-slate-500">Collected Revenue</CardTitle>
+              <CardTitle className="text-sm text-slate-500 dark:text-slate-300">
+                Collected Revenue
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-semibold text-slate-900">
+              <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrency(summary.totalRevenue, summary.currency)}
               </p>
             </CardContent>
           </Card>
-          <Card className="border-slate-200">
+          <Card className="border-slate-200 dark:border-slate-700 dark:bg-slate-900">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-slate-500">Outstanding</CardTitle>
+              <CardTitle className="text-sm text-slate-500 dark:text-slate-300">
+                Outstanding
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-semibold text-slate-900">
+              <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrency(summary.pendingAmount, summary.currency)}
               </p>
             </CardContent>
           </Card>
         </section>
 
-        <Card className="border-slate-200">
-          <CardHeader className="flex-row items-center justify-between pb-3 space-y-0 border-b border-slate-200">
-            <CardTitle className="text-xl text-slate-900">Your Invoices</CardTitle>
+        <Card className="border-slate-200 dark:border-slate-700 dark:bg-slate-900">
+          <CardHeader className="flex-row items-center justify-between border-b border-slate-200 pb-3 space-y-0 dark:border-slate-700">
+            <CardTitle className="text-xl text-slate-900 dark:text-slate-100">
+              Your Invoices
+            </CardTitle>
             <Button variant="outline" size="sm" onClick={fetchInvoices} disabled={isLoading}>
               <ReloadIcon className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
@@ -245,13 +257,13 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="p-0">
             {loadError ? (
-              <div className="px-6 py-5 text-sm text-rose-700 border-l-4 bg-rose-50 border-rose-300">
+              <div className="border-l-4 border-rose-300 bg-rose-50 px-6 py-5 text-sm text-rose-700 dark:border-rose-400/60 dark:bg-rose-500/15 dark:text-rose-200">
                 {loadError}
               </div>
             ) : null}
 
             {isLoading ? (
-              <div className="flex items-center gap-2 px-6 py-8 text-slate-600">
+              <div className="flex items-center gap-2 px-6 py-8 text-slate-600 dark:text-slate-300">
                 <ReloadIcon className="w-4 h-4 animate-spin" />
                 Loading invoices...
               </div>
@@ -274,10 +286,12 @@ export default function DashboardPage() {
                     const isActioning = activeActionInvoiceId === invoice._id;
                     return (
                       <TableRow key={invoice._id}>
-                        <TableCell className="font-medium text-slate-800">
+                        <TableCell className="font-medium text-slate-800 dark:text-slate-100">
                           {invoice.invoiceNumber}
                         </TableCell>
-                        <TableCell className="text-slate-600">{invoice.billTo}</TableCell>
+                        <TableCell className="text-slate-600 dark:text-slate-300">
+                          {invoice.billTo}
+                        </TableCell>
                         <TableCell>
                           <span
                             className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold uppercase ${statusClassName[status]}`}
@@ -285,13 +299,13 @@ export default function DashboardPage() {
                             {status}
                           </span>
                         </TableCell>
-                        <TableCell className="text-slate-600">
+                        <TableCell className="text-slate-600 dark:text-slate-300">
                           {formatDateLong(invoice.invoiceDate)}
                         </TableCell>
-                        <TableCell className="text-slate-600">
+                        <TableCell className="text-slate-600 dark:text-slate-300">
                           {formatDateLong(invoice.dueDate)}
                         </TableCell>
-                        <TableCell className="font-medium text-slate-800">
+                        <TableCell className="font-medium text-slate-800 dark:text-slate-100">
                           {formatCurrency(invoice.total, invoice.currency)}
                         </TableCell>
                         <TableCell>
@@ -327,7 +341,7 @@ export default function DashboardPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                              className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:border-rose-500/50 dark:text-rose-300 dark:hover:bg-rose-500/20 dark:hover:text-rose-200"
                               onClick={() => softDeleteInvoice(invoice._id)}
                               disabled={isActioning}
                             >
@@ -342,7 +356,7 @@ export default function DashboardPage() {
               </Table>
             ) : (
               <div className="px-6 py-10 text-center">
-                <p className="text-slate-600">No invoices yet.</p>
+                <p className="text-slate-600 dark:text-slate-300">No invoices yet.</p>
                 <Button className="mt-4" onClick={() => router.push("/create-invoice")}>
                   <PlusIcon className="w-4 h-4" />
                   Create your first invoice

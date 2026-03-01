@@ -57,7 +57,7 @@ const quips = [
 
 export default function LandingPage() {
   return (
-    <main className="relative overflow-hidden bg-slate-950 text-slate-100">
+    <main className="relative overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <Spotlight
         className="-top-48 left-1/2 h-[34rem] w-[34rem] -translate-x-1/2 opacity-60"
         fill="#0EA5E9"
@@ -75,16 +75,16 @@ export default function LandingPage() {
       <section className="relative px-4 pt-16 pb-14 sm:px-6 sm:pt-20 lg:px-10 lg:pt-24">
         <div className="mx-auto grid w-full max-w-7xl items-start gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:gap-14">
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:border-white/15 dark:bg-white/10 dark:text-sky-100">
               <RocketIcon className="h-3.5 w-3.5" />
               Invoicey
             </span>
 
-            <h1 className="mt-5 text-balance text-4xl font-semibold leading-[1.05] text-white sm:text-5xl lg:text-6xl">
+            <h1 className="mt-5 text-balance text-4xl font-semibold leading-[1.05] text-slate-900 dark:text-white sm:text-5xl lg:text-6xl">
               Build serious invoices fast, free and hassle-free.
             </h1>
 
-            <p className="mt-5 max-w-2xl text-pretty text-base leading-relaxed text-slate-300 sm:text-lg">
+            <p className="mt-5 max-w-2xl text-pretty text-base leading-relaxed text-slate-600 dark:text-slate-300 sm:text-lg">
               Build invoices that look industry-grade, edit them anytime, and export in multiple formats your clients already trust.
             </p>
 
@@ -103,21 +103,24 @@ export default function LandingPage() {
                 asChild
                 size="lg"
                 variant="outline"
-                className="border-white/25 bg-white/5 text-white hover:bg-white/10"
+                className="border-slate-300 bg-white/80 text-slate-900 hover:bg-slate-100 dark:border-white/25 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
               >
                 <Link href="/dashboard">Go to Dashboard</Link>
               </Button>
             </div>
 
-            <ul className="mt-8 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+            <ul className="mt-8 grid gap-2 text-sm text-slate-600 dark:text-slate-300 sm:grid-cols-2">
               {quips.map((quip) => (
-                <li key={quip} className="rounded-lg bg-white/[0.03] px-3 py-2">
+                <li
+                  key={quip}
+                  className="rounded-lg bg-slate-200/70 px-3 py-2 dark:bg-white/[0.03]"
+                >
                   {quip}
                 </li>
               ))}
             </ul>
 
-            <div className="mt-8 flex flex-wrap items-center gap-5 text-sm text-slate-300">
+            <div className="mt-8 flex flex-wrap items-center gap-5 text-sm text-slate-600 dark:text-slate-300">
               <div className="flex items-center gap-2">
                 <PersonIcon className="h-4 w-4" />
                 <span>Solo founders to small teams</span>
@@ -131,50 +134,60 @@ export default function LandingPage() {
 
           <div className="relative lg:pt-4">
             <div className="absolute -inset-0.5 rounded-3xl bg-[conic-gradient(from_120deg,_rgba(56,189,248,0.75),rgba(249,115,22,0.4),rgba(59,130,246,0.75),rgba(56,189,248,0.75))] opacity-75 blur" />
-            <div className="relative overflow-hidden rounded-3xl border border-white/15 bg-slate-900/85 p-5 shadow-[0_30px_80px_rgba(2,6,23,0.55)] sm:p-6">
-              <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
+            <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-[0_30px_80px_rgba(2,6,23,0.18)] dark:border-white/15 dark:bg-slate-900/85 dark:shadow-[0_30px_80px_rgba(2,6,23,0.55)] sm:p-6">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4 dark:border-white/10">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
                     Preview
                   </p>
-                  <h2 className="mt-1 text-2xl font-semibold text-white">INV-849231</h2>
+                  <h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">
+                    INV-849231
+                  </h2>
                 </div>
                 <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-200">
                   Paid
                 </span>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-4 text-sm text-slate-200">
+              <div className="mt-4 grid grid-cols-2 gap-4 text-sm text-slate-700 dark:text-slate-200">
                 <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-400">Client</p>
-                  <p className="mt-1 font-medium text-white">Acme Manufacturing</p>
+                  <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Client
+                  </p>
+                  <p className="mt-1 font-medium text-slate-900 dark:text-white">
+                    Acme Manufacturing
+                  </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[11px] uppercase tracking-wider text-slate-400">Total</p>
-                  <p className="mt-1 text-xl font-semibold text-white">₹2,48,400</p>
+                  <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Total
+                  </p>
+                  <p className="mt-1 text-xl font-semibold text-slate-900 dark:text-white">
+                    ₹2,48,400
+                  </p>
                 </div>
               </div>
 
-              <div className="mt-5 space-y-2 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
-                <div className="flex justify-between text-slate-200">
+              <div className="mt-5 space-y-2 rounded-xl border border-slate-200 bg-slate-100/80 p-4 text-sm dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="flex justify-between text-slate-700 dark:text-slate-200">
                   <span>Development Sprint</span>
                   <span>₹1,80,000</span>
                 </div>
-                <div className="flex justify-between text-slate-200">
+                <div className="flex justify-between text-slate-700 dark:text-slate-200">
                   <span>Support Retainer</span>
                   <span>₹45,000</span>
                 </div>
-                <div className="flex justify-between text-slate-200">
+                <div className="flex justify-between text-slate-700 dark:text-slate-200">
                   <span>Taxes + charges</span>
                   <span>₹23,400</span>
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-2 gap-3 text-[11px] text-slate-300">
-                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+              <div className="mt-5 grid grid-cols-2 gap-3 text-[11px] text-slate-600 dark:text-slate-300">
+                <div className="rounded-lg border border-slate-200 bg-slate-100/80 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
                   Export: PDF / HTML / CSV / JSON
                 </div>
-                <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-right">
+                <div className="rounded-lg border border-slate-200 bg-slate-100/80 px-3 py-2 text-right dark:border-white/10 dark:bg-white/[0.03]">
                   Edit anytime from dashboard
                 </div>
               </div>
@@ -186,10 +199,10 @@ export default function LandingPage() {
       <section className="relative px-4 pb-16 sm:px-6 lg:px-10 lg:pb-20">
         <div className="mx-auto w-full max-w-7xl">
           <div className="mb-6 max-w-2xl">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
               Product Surface
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-white sm:text-3xl">
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white sm:text-3xl">
               Designed to feel like a real product, not a toy generator.
             </h2>
           </div>

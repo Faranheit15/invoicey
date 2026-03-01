@@ -103,7 +103,7 @@ export default function AuthPage() {
   };
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-14 text-slate-100 sm:px-6 lg:px-10">
+    <main className="relative min-h-screen overflow-hidden bg-slate-100 px-4 py-14 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-10">
       <Spotlight
         className="-top-40 left-1/2 h-[28rem] w-[28rem] -translate-x-1/2 opacity-55"
         fill="#0EA5E9"
@@ -116,46 +116,48 @@ export default function AuthPage() {
 
       <div className="relative mx-auto grid w-full max-w-6xl gap-10 lg:grid-cols-[1fr_440px]">
         <section className="space-y-6 pt-6 lg:pt-12">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:border-white/15 dark:bg-white/10 dark:text-sky-100">
             <RocketIcon className="h-3.5 w-3.5" />
             Invoicey Access
           </span>
-          <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-white sm:text-5xl">
+          <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-slate-900 dark:text-white sm:text-5xl">
             Sign in and get back to shipping invoices.
           </h1>
-          <p className="max-w-xl text-base leading-relaxed text-slate-300 sm:text-lg">
+          <p className="max-w-xl text-base leading-relaxed text-slate-600 dark:text-slate-300 sm:text-lg">
             Use your Google account to securely access invoice drafts, payment
             history, and exports across devices.
           </p>
-          <ul className="grid max-w-xl gap-3 text-sm text-slate-200 sm:grid-cols-2">
-            <li className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+          <ul className="grid max-w-xl gap-3 text-sm text-slate-700 dark:text-slate-200 sm:grid-cols-2">
+            <li className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
               <CheckCircledIcon className="mb-2 h-4 w-4 text-emerald-300" />
               Continue exactly where you left off
             </li>
-            <li className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+            <li className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
               <CheckCircledIcon className="mb-2 h-4 w-4 text-emerald-300" />
               Export-ready invoices in a few clicks
             </li>
           </ul>
         </section>
 
-        <Card className="border-white/15 bg-slate-900/80 shadow-[0_28px_70px_rgba(2,6,23,0.5)] backdrop-blur">
+        <Card className="border-slate-200 bg-white/90 text-slate-900 shadow-[0_28px_70px_rgba(2,6,23,0.1)] backdrop-blur dark:border-white/15 dark:bg-slate-900/80 dark:text-slate-100 dark:shadow-[0_28px_70px_rgba(2,6,23,0.5)]">
           <CardHeader className="space-y-3 pb-3">
-            <CardTitle className="text-2xl text-white">Welcome Back</CardTitle>
-            <p className="text-sm text-slate-300">
+            <CardTitle className="text-2xl text-slate-900 dark:text-white">
+              Welcome Back
+            </CardTitle>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
               Secure sign in with Google to access your dashboard.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <Button
               onClick={handleGoogleSignIn}
-              className="h-11 w-full bg-white text-slate-900 hover:bg-slate-100"
+              className="h-11 w-full bg-slate-900 text-slate-100 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
             >
               <span className="mr-2 text-lg font-semibold">G</span>
               Continue with Google
               <ArrowRightIcon className="ml-auto h-4 w-4" />
             </Button>
-            <p className="text-xs leading-relaxed text-slate-400">
+            <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
               By continuing, you agree to use Invoicey for lawful invoicing and
               account management purposes.
             </p>

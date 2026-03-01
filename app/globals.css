@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     --background: 210 33% 98%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
@@ -32,6 +33,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     --background: 222 47% 11%;
     --foreground: 210 40% 98%;
     --card: 222 47% 13%;
@@ -58,7 +60,7 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background text-foreground antialiased transition-colors duration-200;
     font-family: var(--font-geist-sans), "Segoe UI", sans-serif;
   }
 }

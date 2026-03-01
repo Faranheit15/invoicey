@@ -14,7 +14,7 @@ const includedFeatures = [
 
 export default function PricingPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-14 text-slate-100 sm:px-6 lg:px-10">
+    <main className="relative min-h-screen overflow-hidden bg-slate-100 px-4 py-14 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-10">
       <Spotlight
         className="-top-40 left-1/2 h-[30rem] w-[30rem] -translate-x-1/2 opacity-60"
         fill="#0EA5E9"
@@ -27,29 +27,31 @@ export default function PricingPage() {
 
       <section className="relative mx-auto max-w-5xl">
         <div className="mx-auto max-w-2xl text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:border-white/15 dark:bg-white/10 dark:text-sky-100">
             <RocketIcon className="h-3.5 w-3.5" />
             Pricing
           </span>
-          <h1 className="mt-4 text-4xl font-semibold leading-tight text-white sm:text-5xl">
+          <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-900 dark:text-white sm:text-5xl">
             Free plan. Full workflow.
           </h1>
-          <p className="mt-4 text-base leading-relaxed text-slate-300 sm:text-lg">
+          <p className="mt-4 text-base leading-relaxed text-slate-600 dark:text-slate-300 sm:text-lg">
             Invoicey is currently free to use while we polish the platform for
             public launch.
           </p>
         </div>
 
-        <Card className="mx-auto mt-8 max-w-xl border-white/15 bg-slate-900/80 text-slate-100 shadow-[0_28px_70px_rgba(2,6,23,0.5)] backdrop-blur">
-          <CardHeader className="space-y-2 border-b border-white/10 pb-4">
-            <CardTitle className="text-2xl text-white">Starter</CardTitle>
-            <p className="text-sm text-slate-300">
+        <Card className="mx-auto mt-8 max-w-xl border-slate-200 bg-white/90 text-slate-900 shadow-[0_28px_70px_rgba(2,6,23,0.1)] backdrop-blur dark:border-white/15 dark:bg-slate-900/80 dark:text-slate-100 dark:shadow-[0_28px_70px_rgba(2,6,23,0.5)]">
+          <CardHeader className="space-y-2 border-b border-slate-200 pb-4 dark:border-white/10">
+            <CardTitle className="text-2xl text-slate-900 dark:text-white">
+              Starter
+            </CardTitle>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
               Built for freelancers, founders, and small teams.
             </p>
-            <p className="text-4xl font-semibold text-white">$0</p>
+            <p className="text-4xl font-semibold text-slate-900 dark:text-white">$0</p>
           </CardHeader>
           <CardContent className="space-y-5 pt-5">
-            <ul className="space-y-3 text-sm text-slate-200">
+            <ul className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
               {includedFeatures.map((feature) => (
                 <li key={feature} className="flex items-start gap-2">
                   <CheckCircledIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
@@ -57,10 +59,14 @@ export default function PricingPage() {
                 </li>
               ))}
             </ul>
-            <Button asChild className="w-full bg-white text-slate-900 hover:bg-slate-100">
+            <Button asChild className="w-full bg-slate-900 text-slate-100 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100">
               <Link href="/auth">Start Free</Link>
             </Button>
-            <Button asChild variant="outline" className="w-full border-white/30 bg-white/5 hover:bg-white/10">
+            <Button
+              asChild
+              variant="outline"
+              className="w-full border-slate-300 bg-white/70 hover:bg-slate-100 dark:border-white/30 dark:bg-white/5 dark:hover:bg-white/10"
+            >
               <Link href="https://buymeacoffee.com/faaaaraaaan">
                 Support Invoicey
               </Link>
