@@ -4,7 +4,9 @@ import { type FocusEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DatePickerField } from "@/components/ui/date-picker-field";
 import { Input } from "@/components/ui/input";
+import { SelectField } from "@/components/ui/select-field";
 import { Textarea } from "@/components/ui/textarea";
 import { auth } from "@/lib/firebase";
 import {
@@ -267,14 +269,15 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       <div className="mx-auto max-w-7xl">
         <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <button
-              className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
-              onClick={() => router.push("/dashboard")}
+            <Button
               type="button"
+              variant="ghost"
+              onClick={() => router.push("/dashboard")}
+              className="h-auto p-0 text-sm font-normal text-slate-600 hover:bg-transparent hover:text-slate-900 dark:text-slate-300 dark:hover:bg-transparent dark:hover:text-white"
             >
               <ArrowLeftIcon className="w-4 h-4" />
               Back to dashboard
-            </button>
+            </Button>
             <h1 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-slate-100">
               {mode === "edit" ? "Edit Invoice" : "Create Invoice"}
             </h1>
@@ -395,39 +398,38 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       updateField("invoiceNumber", event.target.value)
                     }
                   />
-                  <Input
-                    type="date"
+                  <DatePickerField
                     value={invoice.invoiceDate}
-                    onChange={(event) => updateField("invoiceDate", event.target.value)}
+                    onValueChange={(value) => updateField("invoiceDate", value)}
+                    placeholder="Invoice date"
                   />
-                  <Input
-                    type="date"
+                  <DatePickerField
                     value={invoice.dueDate}
-                    onChange={(event) => updateField("dueDate", event.target.value)}
+                    onValueChange={(value) => updateField("dueDate", value)}
+                    placeholder="Due date"
                   />
-                  <select
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900 dark:text-slate-100"
+                  <SelectField
                     value={invoice.currency}
-                    onChange={(event) => updateField("currency", event.target.value)}
-                  >
-                    {CURRENCY_OPTIONS.map((currencyCode) => (
-                      <option key={currencyCode} value={currencyCode}>
-                        {currencyCode}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900 dark:text-slate-100"
+                    onValueChange={(value) => updateField("currency", value)}
+                    options={CURRENCY_OPTIONS.map((currencyCode) => ({
+                      value: currencyCode,
+                      label: currencyCode,
+                    }))}
+                    className="text-slate-900 dark:text-slate-100"
+                  />
+                  <SelectField
                     value={invoice.status}
-                    onChange={(event) =>
-                      updateField("status", event.target.value as InvoiceStatus)
+                    onValueChange={(value) =>
+                      updateField("status", value as InvoiceStatus)
                     }
-                  >
-                    <option value="draft">Draft</option>
-                    <option value="sent">Sent</option>
-                    <option value="paid">Paid</option>
-                    <option value="overdue">Overdue</option>
-                  </select>
+                    options={[
+                      { value: "draft", label: "Draft" },
+                      { value: "sent", label: "Sent" },
+                      { value: "paid", label: "Paid" },
+                      { value: "overdue", label: "Overdue" },
+                    ]}
+                    className="text-slate-900 dark:text-slate-100"
+                  />
                   <Input
                     placeholder="Payment terms"
                     value={invoice.terms}
