@@ -1,40 +1,83 @@
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GridBackground } from "@/components/ui/aceternity/grid-background";
+import { Spotlight } from "@/components/ui/aceternity/spotlight";
+import {
+  LightningBoltIcon,
+  RocketIcon,
+  StarIcon,
+} from "@radix-ui/react-icons";
+
+const pillars = [
+  {
+    title: "Fast by default",
+    description:
+      "The core workflow focuses on creating polished invoices in minutes, not forcing setup-heavy onboarding.",
+    icon: <LightningBoltIcon className="h-4 w-4" />,
+  },
+  {
+    title: "Professional outputs",
+    description:
+      "Invoice layouts, totals, and exports are tuned for real client delivery so they feel production-ready.",
+    icon: <StarIcon className="h-4 w-4" />,
+  },
+  {
+    title: "Built for operators",
+    description:
+      "Freelancers and small teams can manage status updates, edits, and payment records without tool sprawl.",
+    icon: <RocketIcon className="h-4 w-4" />,
+  },
+];
+
 export default function AboutPage() {
   return (
-    <section className="relative flex flex-col items-center justify-center min-h-screen px-4 py-16 text-center bg-gradient-to-r from-blue-50 via-white to-blue-50">
-      <div className="relative z-10 max-w-3xl">
-        <h1 className="text-4xl font-extrabold text-gray-900 sm:text-5xl">
-          About Invoicey
-        </h1>
-        <p className="mt-4 text-lg text-gray-600">
-          Invoicey is the ultimate invoicing solution for freelancers, small
-          businesses, and entrepreneurs. Create professional invoices in
-          seconds, track payments, and get paid faster—all for free!
-        </p>
-        <p className="mt-4 text-lg text-gray-600">
-          With Invoicey, you can generate invoices instantly, manage your client
-          payments, and ensure smooth business transactions. Our user-friendly
-          interface ensures that anyone, even with no technical knowledge, can
-          create and send invoices effortlessly.
-        </p>
-      </div>
-      {/* Decorative Background Element */}
-      <div className="absolute inset-0 overflow-hidden -z-10">
-        <svg
-          className="absolute top-0 -translate-x-1/2 left-1/2 opacity-20"
-          width="800"
-          height="600"
-          fill="none"
-          viewBox="0 0 800 600"
-        >
-          <circle cx="400" cy="300" r="300" fill="url(#grad)" />
-          <defs>
-            <radialGradient id="grad" cx="0.5" cy="0.5" r="0.5">
-              <stop offset="0%" stopColor="#3B82F6" />
-              <stop offset="100%" stopColor="#93C5FD" />
-            </radialGradient>
-          </defs>
-        </svg>
-      </div>
-    </section>
+    <main className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-14 text-slate-100 sm:px-6 lg:px-10">
+      <Spotlight
+        className="-top-40 left-1/2 h-[30rem] w-[30rem] -translate-x-1/2 opacity-60"
+        fill="#0EA5E9"
+      />
+      <Spotlight
+        className="-left-24 bottom-8 h-[22rem] w-[22rem] opacity-35"
+        fill="#F97316"
+      />
+      <GridBackground className="opacity-70" />
+
+      <section className="relative mx-auto max-w-6xl space-y-10">
+        <div className="max-w-3xl">
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+            <RocketIcon className="h-3.5 w-3.5" />
+            About Invoicey
+          </span>
+          <h1 className="mt-4 text-4xl font-semibold leading-tight text-white sm:text-5xl">
+            A practical billing workspace for people shipping real work.
+          </h1>
+          <p className="mt-4 text-base leading-relaxed text-slate-300 sm:text-lg">
+            Invoicey was created for founders, freelancers, and teams who need
+            clean invoices without bloated accounting software. The product keeps
+            the workflow focused: create, edit, track, and export.
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          {pillars.map((pillar) => (
+            <Card
+              key={pillar.title}
+              className="border-white/10 bg-slate-900/75 text-slate-100 backdrop-blur"
+            >
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-lg text-white">
+                  {pillar.icon}
+                  {pillar.title}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm leading-relaxed text-slate-300">
+                  {pillar.description}
+                </p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </section>
+    </main>
   );
 }

@@ -59,7 +59,7 @@ export default function DashboardPage() {
 
       const currentUser = auth.currentUser;
       if (!currentUser) {
-        router.push("/auth");
+        router.replace("/auth?next=%2Fdashboard");
         return;
       }
 
@@ -99,7 +99,7 @@ export default function DashboardPage() {
 
         const currentUser = auth.currentUser;
         if (!currentUser) {
-          router.push("/auth");
+          router.replace("/auth?next=%2Fdashboard");
           return false;
         }
 

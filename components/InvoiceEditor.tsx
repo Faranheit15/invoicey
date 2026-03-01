@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FocusEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +50,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const authRedirectPath = useMemo(() => {
+    if (mode === "edit" && invoiceId) {
+      return `/auth?next=${encodeURIComponent(`/create-invoice/${invoiceId}`)}`;
+    }
+    return "/auth?next=%2Fcreate-invoice";
+  }, [invoiceId, mode]);
 
   const totals = useMemo(
     () =>
@@ -76,7 +82,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
 
       try {
         if (!auth.currentUser) {
-          router.push("/auth");
+          router.replace(authRedirectPath);
           return;
         }
 
@@ -110,7 +116,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     };
 
     fetchInvoice();
-  }, [invoiceId, mode, router]);
+  }, [authRedirectPath, invoiceId, mode, router]);
 
   const updateField = <K extends keyof InvoiceFormState>(
     key: K,
@@ -150,6 +156,20 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     });
   };
 
+  const parseNumberInput = (value: string, fallback = 0) => {
+    if (!value.trim()) {
+      return fallback;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const selectZeroValueOnFocus = (event: FocusEvent<HTMLInputElement>) => {
+    if (event.target.value === "0") {
+      event.target.select();
+    }
+  };
+
   const saveInvoice = async (status: InvoiceStatus = invoice.status) => {
     setError("");
 
@@ -183,7 +203,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       setIsSaving(true);
 
       if (!auth.currentUser) {
-        router.push("/auth");
+        router.replace(authRedirectPath);
         return;
       }
 
@@ -239,7 +259,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   return (
     <main className="min-h-screen px-4 py-8 bg-gradient-to-b from-slate-100 via-slate-50 to-white sm:px-6 lg:px-10">
       <div className="mx-auto max-w-7xl">
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <button
               className="inline-flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
@@ -256,15 +276,20 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               Build polished invoices with complete business and payment details.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <Button
               variant="outline"
               disabled={isSaving}
               onClick={() => saveInvoice("draft")}
+              className="w-full sm:w-auto"
             >
               Save Draft
             </Button>
-            <Button disabled={isSaving} onClick={() => saveInvoice("sent")}>
+            <Button
+              disabled={isSaving}
+              onClick={() => saveInvoice("sent")}
+              className="w-full sm:w-auto"
+            >
               {isSaving ? (
                 <>
                   <ReloadIcon className="w-4 h-4 animate-spin" />
@@ -414,62 +439,141 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   </Button>
                 </div>
                 <div className="overflow-x-auto border rounded-md border-slate-200">
-                  <div className="grid min-w-[680px] grid-cols-[1.6fr_120px_150px_140px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <div>Description</div>
-                    <div>Qty</div>
-                    <div>Unit Price</div>
-                    <div>Amount</div>
-                    <div></div>
+                  <div className="hidden md:block">
+                    <div className="grid min-w-[680px] grid-cols-[1.6fr_120px_150px_140px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <div>Description</div>
+                      <div>Qty</div>
+                      <div>Unit Price</div>
+                      <div>Amount</div>
+                      <div></div>
+                    </div>
+                    <div className="min-w-[680px] space-y-2 p-3">
+                      {invoice.items.map((item, index) => (
+                        <div
+                          className="grid grid-cols-[1.6fr_120px_150px_140px_44px] items-center gap-2"
+                          key={`item-${index}`}
+                        >
+                          <Input
+                            placeholder="e.g. Monthly retainer"
+                            value={item.description}
+                            onChange={(event) =>
+                              updateItem(index, "description", event.target.value)
+                            }
+                          />
+                          <Input
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onFocus={selectZeroValueOnFocus}
+                            onChange={(event) =>
+                              updateItem(
+                                index,
+                                "quantity",
+                                Math.max(1, parseNumberInput(event.target.value, 1))
+                              )
+                            }
+                          />
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={item.unitPrice}
+                            onFocus={selectZeroValueOnFocus}
+                            onChange={(event) =>
+                              updateItem(
+                                index,
+                                "unitPrice",
+                                Math.max(0, parseNumberInput(event.target.value, 0))
+                              )
+                            }
+                            placeholder="0.00"
+                          />
+                          <div className="text-sm font-medium text-right text-slate-700">
+                            {formatCurrency(
+                              Math.max(0, item.quantity) * Math.max(0, item.unitPrice),
+                              invoice.currency
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeItem(index)}
+                            disabled={invoice.items.length === 1}
+                            aria-label="Remove item"
+                          >
+                            <TrashIcon className="w-4 h-4 text-slate-500" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="min-w-[680px] space-y-2 p-3">
+
+                  <div className="space-y-3 p-3 md:hidden">
                     {invoice.items.map((item, index) => (
                       <div
-                        className="grid grid-cols-[1.6fr_120px_150px_140px_44px] items-center gap-2"
-                        key={`${index}-${item.description}`}
+                        className="rounded-lg border border-slate-200 bg-slate-50/70 p-3"
+                        key={`item-mobile-${index}`}
                       >
-                        <Input
-                          placeholder="e.g. Monthly retainer"
-                          value={item.description}
-                          onChange={(event) =>
-                            updateItem(index, "description", event.target.value)
-                          }
-                        />
-                        <Input
-                          type="number"
-                          min={1}
-                          value={item.quantity}
-                          onChange={(event) =>
-                            updateItem(index, "quantity", Number(event.target.value) || 1)
-                          }
-                        />
-                        <Input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={item.unitPrice}
-                          onChange={(event) =>
-                            updateItem(
-                              index,
-                              "unitPrice",
-                              Number(event.target.value) || 0
-                            )
-                          }
-                        />
-                        <div className="text-sm font-medium text-right text-slate-700">
-                          {formatCurrency(
-                            Math.max(0, item.quantity) * Math.max(0, item.unitPrice),
-                            invoice.currency
-                          )}
+                        <div className="space-y-2">
+                          <Input
+                            placeholder="Description"
+                            value={item.description}
+                            onChange={(event) =>
+                              updateItem(index, "description", event.target.value)
+                            }
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              type="number"
+                              min={1}
+                              value={item.quantity}
+                              onFocus={selectZeroValueOnFocus}
+                              onChange={(event) =>
+                                updateItem(
+                                  index,
+                                  "quantity",
+                                  Math.max(1, parseNumberInput(event.target.value, 1))
+                                )
+                              }
+                            />
+                            <Input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={item.unitPrice}
+                              onFocus={selectZeroValueOnFocus}
+                              onChange={(event) =>
+                                updateItem(
+                                  index,
+                                  "unitPrice",
+                                  Math.max(0, parseNumberInput(event.target.value, 0))
+                                )
+                              }
+                              placeholder="Unit price"
+                            />
+                          </div>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeItem(index)}
-                          disabled={invoice.items.length === 1}
-                          aria-label="Remove item"
-                        >
-                          <TrashIcon className="w-4 h-4 text-slate-500" />
-                        </Button>
+                        <div className="mt-3 flex items-center justify-between text-sm">
+                          <span className="text-slate-500">Amount</span>
+                          <span className="font-semibold text-slate-700">
+                            {formatCurrency(
+                              Math.max(0, item.quantity) * Math.max(0, item.unitPrice),
+                              invoice.currency
+                            )}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeItem(index)}
+                            disabled={invoice.items.length === 1}
+                            aria-label="Remove item"
+                          >
+                            <TrashIcon className="w-4 h-4 text-slate-500" />
+                            Remove
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -483,8 +587,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   step="0.01"
                   placeholder="Discount"
                   value={invoice.discount}
+                  onFocus={selectZeroValueOnFocus}
                   onChange={(event) =>
-                    updateField("discount", Number(event.target.value) || 0)
+                    updateField(
+                      "discount",
+                      Math.max(0, parseNumberInput(event.target.value, 0))
+                    )
                   }
                 />
                 <Input
@@ -493,7 +601,10 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   step="0.01"
                   placeholder="Tax"
                   value={invoice.tax}
-                  onChange={(event) => updateField("tax", Number(event.target.value) || 0)}
+                  onFocus={selectZeroValueOnFocus}
+                  onChange={(event) =>
+                    updateField("tax", Math.max(0, parseNumberInput(event.target.value, 0)))
+                  }
                 />
                 <Input
                   type="number"
@@ -501,8 +612,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   step="0.01"
                   placeholder="Service charge"
                   value={invoice.convenienceCharge}
+                  onFocus={selectZeroValueOnFocus}
                   onChange={(event) =>
-                    updateField("convenienceCharge", Number(event.target.value) || 0)
+                    updateField(
+                      "convenienceCharge",
+                      Math.max(0, parseNumberInput(event.target.value, 0))
+                    )
                   }
                 />
               </section>

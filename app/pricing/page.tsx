@@ -1,53 +1,73 @@
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import Link from "next/link";
+import { GridBackground } from "@/components/ui/aceternity/grid-background";
+import { Spotlight } from "@/components/ui/aceternity/spotlight";
+import { CheckCircledIcon, RocketIcon } from "@radix-ui/react-icons";
+
+const includedFeatures = [
+  "Unlimited invoice creation",
+  "Edit and manage invoice status",
+  "PDF/HTML/CSV/JSON exports",
+  "Simple dashboard workflow",
+];
 
 export default function PricingPage() {
   return (
-    <section className="relative flex flex-col items-center justify-center min-h-screen px-4 py-16 text-center bg-gradient-to-r from-blue-50 via-white to-blue-50">
-      <div className="relative z-10 max-w-3xl">
-        <h1 className="text-4xl font-extrabold text-gray-900 sm:text-5xl">
-          Pricing
-        </h1>
-        <p className="mt-4 text-lg text-gray-600">
-          Invoicey is completely free to use!
-        </p>
-        <div className="flex justify-center mt-8">
-          <Card className="shadow-lg w-96">
-            <CardHeader>
-              <CardTitle>Support Invoicey</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-600">
-                Invoicey is free, but if you find it useful, consider supporting
-                the developer. Your support helps maintain and improve the
-                platform.
-              </p>
-              <Button disabled className="w-full mt-4" asChild>
-                <Link href="https://buymeacoffee.com/faaaaraaaan">Donate</Link>
-              </Button>
-            </CardContent>
-          </Card>
+    <main className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-14 text-slate-100 sm:px-6 lg:px-10">
+      <Spotlight
+        className="-top-40 left-1/2 h-[30rem] w-[30rem] -translate-x-1/2 opacity-60"
+        fill="#0EA5E9"
+      />
+      <Spotlight
+        className="-right-24 bottom-2 h-[24rem] w-[24rem] opacity-35"
+        fill="#F97316"
+      />
+      <GridBackground className="opacity-70" />
+
+      <section className="relative mx-auto max-w-5xl">
+        <div className="mx-auto max-w-2xl text-center">
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+            <RocketIcon className="h-3.5 w-3.5" />
+            Pricing
+          </span>
+          <h1 className="mt-4 text-4xl font-semibold leading-tight text-white sm:text-5xl">
+            Free plan. Full workflow.
+          </h1>
+          <p className="mt-4 text-base leading-relaxed text-slate-300 sm:text-lg">
+            Invoicey is currently free to use while we polish the platform for
+            public launch.
+          </p>
         </div>
-      </div>
-      {/* Decorative Background SVG */}
-      <div className="absolute inset-0 overflow-hidden -z-10">
-        <svg
-          className="absolute top-0 -translate-x-1/2 left-1/2 opacity-20"
-          width="800"
-          height="600"
-          fill="none"
-          viewBox="0 0 800 600"
-        >
-          <circle cx="400" cy="300" r="300" fill="url(#grad)" />
-          <defs>
-            <radialGradient id="grad" cx="0.5" cy="0.5" r="0.5">
-              <stop offset="0%" stopColor="#3B82F6" />
-              <stop offset="100%" stopColor="#93C5FD" />
-            </radialGradient>
-          </defs>
-        </svg>
-      </div>
-    </section>
+
+        <Card className="mx-auto mt-8 max-w-xl border-white/15 bg-slate-900/80 text-slate-100 shadow-[0_28px_70px_rgba(2,6,23,0.5)] backdrop-blur">
+          <CardHeader className="space-y-2 border-b border-white/10 pb-4">
+            <CardTitle className="text-2xl text-white">Starter</CardTitle>
+            <p className="text-sm text-slate-300">
+              Built for freelancers, founders, and small teams.
+            </p>
+            <p className="text-4xl font-semibold text-white">$0</p>
+          </CardHeader>
+          <CardContent className="space-y-5 pt-5">
+            <ul className="space-y-3 text-sm text-slate-200">
+              {includedFeatures.map((feature) => (
+                <li key={feature} className="flex items-start gap-2">
+                  <CheckCircledIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                  {feature}
+                </li>
+              ))}
+            </ul>
+            <Button asChild className="w-full bg-white text-slate-900 hover:bg-slate-100">
+              <Link href="/auth">Start Free</Link>
+            </Button>
+            <Button asChild variant="outline" className="w-full border-white/30 bg-white/5 hover:bg-white/10">
+              <Link href="https://buymeacoffee.com/faaaaraaaan">
+                Support Invoicey
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </section>
+    </main>
   );
 }
