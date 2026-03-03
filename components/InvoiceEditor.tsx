@@ -1,6 +1,6 @@
 "use client";
 
-import { type FocusEvent, useEffect, useMemo, useState } from "react";
+import { type FocusEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,8 +8,11 @@ import { DatePickerField } from "@/components/ui/date-picker-field";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Textarea } from "@/components/ui/textarea";
+import InvoiceAiAssistant from "@/components/InvoiceAiAssistant";
 import { auth } from "@/lib/firebase";
 import { requiresEmailVerification } from "@/lib/auth-client";
+import type { InvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/contracts";
+import { applyInvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/apply-patch";
 import {
   CURRENCY_OPTIONS,
   InvoiceFormItem,
@@ -130,6 +133,42 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   useEffect(() => {
     setLogoLoadFailed(false);
   }, [invoice.companyLogo]);
+
+  const getAuthTokenForAssistant = useCallback(async () => {
+    if (!auth.currentUser) {
+      router.replace(authRedirectPath);
+      return null;
+    }
+    if (requiresEmailVerification(auth.currentUser)) {
+      setError("Please verify your email before using AI assistant.");
+      router.replace(`${authRedirectPath}&reason=verify-email`);
+      return null;
+    }
+
+    try {
+      const token = await auth.currentUser.getIdToken();
+      return token;
+    } catch {
+      setError("Unable to verify your session. Please sign in again.");
+      router.replace(authRedirectPath);
+      return null;
+    }
+  }, [authRedirectPath, router]);
+
+  const applyAiPatch = useCallback((patch: InvoiceAssistantPatch) => {
+    let appliedFields: string[] = [];
+
+    setInvoice((previousState) => {
+      const { nextState, appliedFields: nextAppliedFields } = applyInvoiceAssistantPatch(
+        previousState,
+        patch
+      );
+      appliedFields = nextAppliedFields;
+      return nextState;
+    });
+
+    return appliedFields;
+  }, []);
 
   const updateField = <K extends keyof InvoiceFormState>(
     key: K,
@@ -324,6 +363,16 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             </Button>
           </div>
         </div>
+
+        {mode === "create" ? (
+          <div className="mb-6">
+            <InvoiceAiAssistant
+              invoice={invoice}
+              getAuthToken={getAuthTokenForAssistant}
+              onApplyPatch={applyAiPatch}
+            />
+          </div>
+        ) : null}
 
         {error ? (
           <div className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/15 dark:text-rose-200">

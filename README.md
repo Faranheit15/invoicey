@@ -44,6 +44,7 @@ Invoicey is designed for freelancers, founders, and small teams that need a simp
   - currency + status select fields
   - company logo URL support
   - live preview
+- AI-assisted invoice drafting from natural language prompts with follow-up clarification
 - Export formats:
   - Print/PDF
   - HTML
@@ -144,6 +145,7 @@ flowchart TD
 invoicey/
   app/
     api/
+      ai/invoice-assistant/route.ts
       auth/google/route.ts
       invoices/route.ts
     about/page.tsx
@@ -157,6 +159,7 @@ invoicey/
     layout.tsx
     page.tsx
   components/
+    InvoiceAiAssistant.tsx
     InvoiceEditor.tsx
     InvoiceModal.tsx
     ui/
@@ -170,6 +173,13 @@ invoicey/
       popover.tsx
       ...
   lib/
+    ai/invoice-assistant/
+      apply-patch.ts
+      contracts.ts
+      normalization.ts
+      prompt.ts
+      provider.ts
+      service.ts
     firebase.ts
     mongodb.ts
     invoice-export.ts
@@ -226,6 +236,9 @@ App runs at `http://localhost:3000`.
 | `FIREBASE_ADMIN_CREDENTIALS` | Yes | Firebase Admin service account JSON or base64 JSON |
 | `MONGODB_URI` | Yes | MongoDB connection URI |
 | `JWT_SECRET` | Yes | Secret used for session token signing |
+| `GEMINI_API_KEY` | Yes (for AI assistant) | Gemini API key used by `/api/ai/invoice-assistant` |
+| `GEMINI_MODEL` | Optional | Gemini model id (default: `gemini-2.5-flash`) |
+| `INVOICE_AI_PROVIDER` | Optional | Provider switch for AI assistant (default: `gemini`) |
 
 ## Scripts
 
@@ -255,6 +268,12 @@ bun run start   # production server
 
 - Creates a new invoice for authenticated user
 - Normalizes line items and totals
+
+### `POST /api/ai/invoice-assistant`
+
+- Accepts natural language invoice input + current form draft
+- Uses Gemini to extract normalized invoice fields
+- Returns form patch payload and clarification questions
 
 ### `PUT /api/invoices?id=<invoiceId>`
 
