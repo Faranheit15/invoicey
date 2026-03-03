@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { BentoGrid, BentoGridItem } from "@/components/ui/aceternity/bento-grid";
 import { GridBackground } from "@/components/ui/aceternity/grid-background";
@@ -49,10 +50,30 @@ const featureCards = [
 ];
 
 const quips = [
-  "Not backed by Y Combinator (yet).",
-  "Not backend by YCombinator either.",
-  "Backed by strong coffee and strict TypeScript.",
-  "No hidden button for \"contact enterprise\".",
+  {
+    id: "yc",
+    className: "sm:col-span-2",
+    content: (
+      <span className="inline-flex items-center gap-2">
+        <span className="whitespace-nowrap">!Backed by</span>
+        <Image
+          src="/y-c.png"
+          alt="Y Combinator"
+          width={132}
+          height={38}
+          className="h-6 w-auto object-contain"
+        />
+      </span>
+    ),
+  },
+  {
+    id: "coffee",
+    content: "Backed by strong coffee and a lazy full-stack developer.",
+  },
+  {
+    id: "enterprise",
+    content: 'No hidden button for "contact enterprise".',
+  },
 ];
 
 export default function LandingPage() {
@@ -109,13 +130,13 @@ export default function LandingPage() {
               </Button>
             </div>
 
-            <ul className="mt-8 grid gap-2 text-sm text-slate-600 dark:text-slate-300 sm:grid-cols-2">
+            <ul className="mt-8 grid auto-rows-fr gap-2 text-sm text-slate-600 dark:text-slate-300 sm:grid-cols-2">
               {quips.map((quip) => (
                 <li
-                  key={quip}
-                  className="rounded-lg bg-slate-200/70 px-3 py-2 dark:bg-white/[0.03]"
+                  key={quip.id}
+                  className={`flex min-h-11 items-center rounded-lg bg-slate-200/70 px-3 py-2 dark:bg-white/[0.03] ${quip.className || ""}`}
                 >
-                  {quip}
+                  {quip.content}
                 </li>
               ))}
             </ul>
