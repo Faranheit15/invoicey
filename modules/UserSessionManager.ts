@@ -7,7 +7,11 @@ interface UserData {
   email: string;
   name: string;
   photoURL: string;
-  providerId: string;
+  providerIds: string[];
+}
+
+interface LegacyUserData extends Omit<UserData, "providerIds"> {
+  providerId?: string;
 }
 
 export default class UserSessionManager {
@@ -82,7 +86,25 @@ export default class UserSessionManager {
   }
 
   get user(): UserData | null {
-    return this.getItem<UserData>(this.keys.user) || null;
+    const value = this.getItem<UserData | LegacyUserData>(this.keys.user);
+    if (!value) {
+      return null;
+    }
+
+    const providerIds = Array.isArray((value as UserData).providerIds)
+      ? (value as UserData).providerIds
+      : typeof (value as LegacyUserData).providerId === "string" &&
+          (value as LegacyUserData).providerId?.trim()
+        ? [(value as LegacyUserData).providerId!.trim()]
+        : [];
+
+    return {
+      uid: value.uid,
+      email: value.email,
+      name: value.name,
+      photoURL: value.photoURL,
+      providerIds: Array.from(new Set(providerIds)),
+    };
   }
   set user(value: UserData | null) {
     if (value) {

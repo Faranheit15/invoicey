@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { auth } from "@/lib/firebase";
+import { requiresEmailVerification } from "@/lib/auth-client";
 import {
   InvoiceRecord,
   formatCurrency,
@@ -64,6 +65,11 @@ export default function DashboardPage() {
         router.replace("/auth?next=%2Fdashboard");
         return;
       }
+      if (requiresEmailVerification(currentUser)) {
+        setLoadError("Please verify your email before accessing your dashboard.");
+        router.replace("/auth?next=%2Fdashboard&reason=verify-email");
+        return;
+      }
 
       const token = await currentUser.getIdToken();
       const response = await fetch("/api/invoices", {
@@ -102,6 +108,11 @@ export default function DashboardPage() {
         const currentUser = auth.currentUser;
         if (!currentUser) {
           router.replace("/auth?next=%2Fdashboard");
+          return false;
+        }
+        if (requiresEmailVerification(currentUser)) {
+          setLoadError("Please verify your email before managing invoices.");
+          router.replace("/auth?next=%2Fdashboard&reason=verify-email");
           return false;
         }
 

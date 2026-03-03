@@ -5,7 +5,7 @@ const UserSchema = new Schema({
   email: { type: String, required: true, unique: true },
   name: { type: String, required: true },
   avatar: { type: String }, // Profile picture URL
-  providerId: { type: String, default: "google.com" },
+  providerIds: { type: [String], default: [] },
   lastLoginAt: { type: Date, required: true },
   createdAt: { type: Date, default: Date.now },
   accessToken: { type: String }, // Store if needed

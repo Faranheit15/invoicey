@@ -6,6 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { requiresEmailVerification } from "@/lib/auth-client";
 import UserSessionManager from "@/modules/UserSessionManager";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +28,7 @@ interface UserData {
   email: string;
   name: string;
   photoURL: string;
-  providerId: string;
+  providerIds: string[];
 }
 
 const fallbackAvatar = "https://via.placeholder.com/40";
@@ -49,6 +50,12 @@ export default function Header() {
 
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
+        if (requiresEmailVerification(firebaseUser)) {
+          userSessionManager.clearLocal();
+          setUser(null);
+          return;
+        }
+
         const storedUser = userSessionManager.user;
         if (storedUser) {
           setUser(storedUser);
@@ -60,7 +67,13 @@ export default function Header() {
           email: firebaseUser.email || "",
           name: firebaseUser.displayName || "User",
           photoURL: firebaseUser.photoURL || fallbackAvatar,
-          providerId: firebaseUser.providerData[0]?.providerId || "unknown",
+          providerIds: Array.from(
+            new Set(
+              firebaseUser.providerData
+                .map((provider) => provider.providerId)
+                .filter((providerId): providerId is string => Boolean(providerId))
+            )
+          ),
         };
 
         userSessionManager.user = normalizedUser;

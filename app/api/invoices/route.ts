@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongodb";
 import Invoice from "@/models/Invoice";
-import admin from "firebase-admin";
+import admin, { ensureFirebaseAdmin } from "@/lib/firebase-admin";
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
 
@@ -68,35 +68,6 @@ interface NormalizedInvoicePayload {
   total: number;
 }
 
-const parseServiceAccount = () => {
-  const serviceAccountStr = process.env.FIREBASE_ADMIN_CREDENTIALS;
-  if (!serviceAccountStr) {
-    throw new Error("Missing FIREBASE_ADMIN_CREDENTIALS");
-  }
-
-  try {
-    return JSON.parse(serviceAccountStr);
-  } catch {
-    try {
-      const decoded = Buffer.from(serviceAccountStr, "base64").toString("utf8");
-      return JSON.parse(decoded);
-    } catch (error: unknown) {
-      throw new Error("Invalid FIREBASE_ADMIN_CREDENTIALS", { cause: error });
-    }
-  }
-};
-
-const ensureFirebaseAdmin = () => {
-  if (admin.apps.length) {
-    return;
-  }
-
-  const serviceAccount = parseServiceAccount();
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-};
-
 const verifyAuth = async (req: NextRequest): Promise<string> => {
   try {
     ensureFirebaseAdmin();
@@ -115,8 +86,17 @@ const verifyAuth = async (req: NextRequest): Promise<string> => {
     if (!decodedToken.uid) {
       throw new Error("Unauthorized");
     }
+    if (
+      decodedToken.firebase?.sign_in_provider === "password" &&
+      !decodedToken.email_verified
+    ) {
+      throw new Error("EmailNotVerified");
+    }
     return decodedToken.uid;
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === "EmailNotVerified") {
+      throw error;
+    }
     throw new Error("Unauthorized", { cause: error });
   }
 };
@@ -229,6 +209,12 @@ const authErrorResponse = (error: unknown) => {
     return NextResponse.json(
       { error: "Server authentication is misconfigured" },
       { status: 500 }
+    );
+  }
+  if (err.message === "EmailNotVerified") {
+    return NextResponse.json(
+      { error: "Please verify your email before accessing invoices." },
+      { status: 403 }
     );
   }
 

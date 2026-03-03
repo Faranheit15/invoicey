@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Textarea } from "@/components/ui/textarea";
 import { auth } from "@/lib/firebase";
+import { requiresEmailVerification } from "@/lib/auth-client";
 import {
   CURRENCY_OPTIONS,
   InvoiceFormItem,
@@ -86,6 +87,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       try {
         if (!auth.currentUser) {
           router.replace(authRedirectPath);
+          return;
+        }
+        if (requiresEmailVerification(auth.currentUser)) {
+          setError("Please verify your email before editing invoices.");
+          router.replace(`${authRedirectPath}&reason=verify-email`);
           return;
         }
 
@@ -211,6 +217,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
 
       if (!auth.currentUser) {
         router.replace(authRedirectPath);
+        return;
+      }
+      if (requiresEmailVerification(auth.currentUser)) {
+        setError("Please verify your email before saving invoices.");
+        router.replace(`${authRedirectPath}&reason=verify-email`);
         return;
       }
 
