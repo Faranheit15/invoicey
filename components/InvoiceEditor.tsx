@@ -591,45 +591,72 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               </section>
 
               <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  placeholder="Discount"
-                  value={invoice.discount}
-                  onFocus={selectZeroValueOnFocus}
-                  onChange={(event) =>
-                    updateField(
-                      "discount",
-                      Math.max(0, parseNumberInput(event.target.value, 0))
-                    )
-                  }
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  placeholder="Tax"
-                  value={invoice.tax}
-                  onFocus={selectZeroValueOnFocus}
-                  onChange={(event) =>
-                    updateField("tax", Math.max(0, parseNumberInput(event.target.value, 0)))
-                  }
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  placeholder="Service charge"
-                  value={invoice.convenienceCharge}
-                  onFocus={selectZeroValueOnFocus}
-                  onChange={(event) =>
-                    updateField(
-                      "convenienceCharge",
-                      Math.max(0, parseNumberInput(event.target.value, 0))
-                    )
-                  }
-                />
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="discount"
+                    className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                  >
+                    Discount
+                  </label>
+                  <Input
+                    id="discount"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="0.00"
+                    value={invoice.discount}
+                    onFocus={selectZeroValueOnFocus}
+                    onChange={(event) =>
+                      updateField(
+                        "discount",
+                        Math.max(0, parseNumberInput(event.target.value, 0))
+                      )
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="tax"
+                    className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                  >
+                    Tax
+                  </label>
+                  <Input
+                    id="tax"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="0.00"
+                    value={invoice.tax}
+                    onFocus={selectZeroValueOnFocus}
+                    onChange={(event) =>
+                      updateField("tax", Math.max(0, parseNumberInput(event.target.value, 0)))
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="service-charge"
+                    className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                  >
+                    Service Charge
+                  </label>
+                  <Input
+                    id="service-charge"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="0.00"
+                    value={invoice.convenienceCharge}
+                    onFocus={selectZeroValueOnFocus}
+                    onChange={(event) =>
+                      updateField(
+                        "convenienceCharge",
+                        Math.max(0, parseNumberInput(event.target.value, 0))
+                      )
+                    }
+                  />
+                </div>
               </section>
 
               <section className="grid gap-3 sm:grid-cols-2">
