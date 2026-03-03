@@ -70,8 +70,8 @@ flowchart LR
   N --> F[Firebase Auth - Client SDK]
   F --> N
 
-  N --> A1[/api/auth/google]
-  N --> A2[/api/invoices]
+  N --> A1["/api/auth/google"]
+  N --> A2["/api/invoices"]
 
   A1 --> FA[Firebase Admin SDK]
   A2 --> FA
