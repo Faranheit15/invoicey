@@ -1,8 +1,7 @@
 import type { DecodedIdToken } from "firebase-admin/auth";
 import User from "@/models/User";
 import Invoice from "@/models/Invoice";
-
-const FALLBACK_AVATAR = "https://via.placeholder.com/40";
+import { normalizeAvatarUrl, sanitizeProviderId } from "@/lib/user-profile";
 
 interface SyncUserInput {
   decodedToken: DecodedIdToken;
@@ -22,37 +21,40 @@ interface UserRecord {
   refreshToken?: string;
 }
 
-const normalizeProviderId = (
-  decodedProviderId: unknown,
-  requestedProviderId?: string
-): string => {
-  if (typeof decodedProviderId === "string" && decodedProviderId.trim()) {
-    return decodedProviderId.trim();
-  }
-
-  if (requestedProviderId?.trim()) {
-    return requestedProviderId.trim();
-  }
-
-  return "unknown";
-};
-
 const normalizeProviderIds = (rawProviderIds: unknown, legacyProviderId: unknown): string[] => {
   const next = new Set<string>();
 
   if (Array.isArray(rawProviderIds)) {
     rawProviderIds.forEach((provider) => {
-      if (typeof provider === "string" && provider.trim()) {
-        next.add(provider.trim());
+      const sanitized = sanitizeProviderId(provider);
+      if (sanitized) {
+        next.add(sanitized);
       }
     });
   }
 
-  if (typeof legacyProviderId === "string" && legacyProviderId.trim()) {
-    next.add(legacyProviderId.trim());
+  const legacyProvider = sanitizeProviderId(legacyProviderId);
+  if (legacyProvider) {
+    next.add(legacyProvider);
   }
 
   return Array.from(next);
+};
+
+const inferProviderIdFromToken = (decodedToken: DecodedIdToken): string | null => {
+  const identities = decodedToken.firebase?.identities;
+  if (!identities || typeof identities !== "object") {
+    return null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(identities, "google.com")) {
+    return "google.com";
+  }
+  if (Object.prototype.hasOwnProperty.call(identities, "email")) {
+    return "password";
+  }
+
+  return null;
 };
 
 const normalizeEmail = (email: string | undefined): string => {
@@ -72,11 +74,6 @@ export const syncUserWithMongo = async ({
     throw new Error("InvalidTokenPayload");
   }
 
-  const providerId = normalizeProviderId(
-    decodedToken.firebase?.sign_in_provider,
-    requestedProviderId
-  );
-
   const existingUser = (await User.findOne({
     $or: [{ uid }, { email }],
   })) as UserRecord | null;
@@ -85,6 +82,13 @@ export const syncUserWithMongo = async ({
     existingUser?.providerIds,
     existingUser?.providerId
   );
+
+  const providerId =
+    sanitizeProviderId(decodedToken.firebase?.sign_in_provider) ||
+    sanitizeProviderId(requestedProviderId) ||
+    inferProviderIdFromToken(decodedToken) ||
+    existingProviderIds[0] ||
+    "password";
 
   const providerIds = Array.from(new Set([...existingProviderIds, providerId]));
 
@@ -95,10 +99,11 @@ export const syncUserWithMongo = async ({
 
   const nextName = nameFromToken || existingUser?.name || email.split("@")[0] || "User";
 
-  const nextAvatar =
-    (typeof decodedToken.picture === "string" && decodedToken.picture.trim()
+  const pictureFromToken =
+    typeof decodedToken.picture === "string" && decodedToken.picture.trim()
       ? decodedToken.picture
-      : existingUser?.avatar) || FALLBACK_AVATAR;
+      : null;
+  const nextAvatar = normalizeAvatarUrl(pictureFromToken || existingUser?.avatar);
 
   const nextRefreshToken =
     typeof refreshToken === "string" ? refreshToken : existingUser?.refreshToken || "";

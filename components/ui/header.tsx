@@ -7,6 +7,11 @@ import { useRouter } from "next/navigation";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { requiresEmailVerification } from "@/lib/auth-client";
+import {
+  DEFAULT_USER_AVATAR,
+  normalizeAvatarUrl,
+  sanitizeProviderId,
+} from "@/lib/user-profile";
 import UserSessionManager from "@/modules/UserSessionManager";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,7 +36,7 @@ interface UserData {
   providerIds: string[];
 }
 
-const fallbackAvatar = "https://via.placeholder.com/40";
+const fallbackAvatar = DEFAULT_USER_AVATAR;
 
 const navLinks = [
   { href: "/about", label: "About" },
@@ -66,11 +71,12 @@ export default function Header() {
           uid: firebaseUser.uid,
           email: firebaseUser.email || "",
           name: firebaseUser.displayName || "User",
-          photoURL: firebaseUser.photoURL || fallbackAvatar,
+          photoURL: normalizeAvatarUrl(firebaseUser.photoURL || fallbackAvatar),
           providerIds: Array.from(
             new Set(
               firebaseUser.providerData
                 .map((provider) => provider.providerId)
+                .map((providerId) => sanitizeProviderId(providerId))
                 .filter((providerId): providerId is string => Boolean(providerId))
             )
           ),

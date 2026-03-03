@@ -1,4 +1,5 @@
 import type { User } from "firebase/auth";
+import { sanitizeProviderId } from "@/lib/user-profile";
 
 export const getProviderIdsFromFirebaseUser = (user: User | null): string[] => {
   if (!user) {
@@ -7,13 +8,12 @@ export const getProviderIdsFromFirebaseUser = (user: User | null): string[] => {
 
   const providerIds = user.providerData
     .map((provider) => provider?.providerId)
-    .filter((providerId): providerId is string =>
-      Boolean(providerId && providerId.trim())
-    )
-    .map((providerId) => providerId.trim());
+    .map((providerId) => sanitizeProviderId(providerId))
+    .filter((providerId): providerId is string => Boolean(providerId));
 
-  if (providerIds.length === 0 && user.providerId?.trim()) {
-    providerIds.push(user.providerId.trim());
+  const fallbackProvider = sanitizeProviderId(user.providerId);
+  if (providerIds.length === 0 && fallbackProvider) {
+    providerIds.push(fallbackProvider);
   }
 
   return Array.from(new Set(providerIds));

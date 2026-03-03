@@ -1,11 +1,13 @@
 import mongoose from "mongoose";
 import connectDB from "../lib/mongodb";
 import User from "../models/User";
+import { normalizeAvatarUrl, sanitizeProviderId } from "../lib/user-profile";
 
 interface MigrationUser {
   _id: mongoose.Types.ObjectId;
   providerId?: unknown;
   providerIds?: unknown;
+  avatar?: unknown;
 }
 
 const toProviderIds = (providerIds: unknown, providerId: unknown): string[] => {
@@ -13,14 +15,20 @@ const toProviderIds = (providerIds: unknown, providerId: unknown): string[] => {
 
   if (Array.isArray(providerIds)) {
     providerIds.forEach((provider) => {
-      if (typeof provider === "string" && provider.trim()) {
-        next.add(provider.trim());
+      const sanitized = sanitizeProviderId(provider);
+      if (sanitized) {
+        next.add(sanitized);
       }
     });
   }
 
-  if (typeof providerId === "string" && providerId.trim()) {
-    next.add(providerId.trim());
+  const legacyProvider = sanitizeProviderId(providerId);
+  if (legacyProvider) {
+    next.add(legacyProvider);
+  }
+
+  if (next.size === 0) {
+    next.add("password");
   }
 
   return Array.from(next);
@@ -33,7 +41,7 @@ const run = async () => {
     {
       $or: [{ providerId: { $exists: true } }, { providerIds: { $exists: true } }],
     },
-    { _id: 1, providerId: 1, providerIds: 1 }
+    { _id: 1, providerId: 1, providerIds: 1, avatar: 1 }
   ).lean()) as MigrationUser[];
 
   if (!users.length) {
@@ -48,7 +56,7 @@ const run = async () => {
       updateOne: {
         filter: { _id: user._id },
         update: {
-          $set: { providerIds },
+          $set: { providerIds, avatar: normalizeAvatarUrl(user.avatar) },
           $unset: { providerId: "" },
         },
       },

@@ -1,6 +1,7 @@
 "use client";
 
 import Cookies from "js-cookie";
+import { normalizeAvatarUrl, sanitizeProviderId } from "@/lib/user-profile";
 
 interface UserData {
   uid: string;
@@ -93,22 +94,24 @@ export default class UserSessionManager {
 
     const providerIds = Array.isArray((value as UserData).providerIds)
       ? (value as UserData).providerIds
+          .map((providerId) => sanitizeProviderId(providerId))
+          .filter((providerId): providerId is string => Boolean(providerId))
       : typeof (value as LegacyUserData).providerId === "string" &&
-          (value as LegacyUserData).providerId?.trim()
-        ? [(value as LegacyUserData).providerId!.trim()]
+          sanitizeProviderId((value as LegacyUserData).providerId)
+        ? [sanitizeProviderId((value as LegacyUserData).providerId)!]
         : [];
 
     return {
       uid: value.uid,
       email: value.email,
       name: value.name,
-      photoURL: value.photoURL,
+      photoURL: normalizeAvatarUrl(value.photoURL),
       providerIds: Array.from(new Set(providerIds)),
     };
   }
   set user(value: UserData | null) {
     if (value) {
-      value.photoURL = value.photoURL || "https://via.placeholder.com/40";
+      value.photoURL = normalizeAvatarUrl(value.photoURL);
       this.setItem(this.keys.user, value);
     } else {
       this.clearLocal();

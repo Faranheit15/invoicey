@@ -31,6 +31,7 @@ import {
   getProviderIdsFromFirebaseUser,
   requiresEmailVerification,
 } from "@/lib/auth-client";
+import { DEFAULT_USER_AVATAR, normalizeAvatarUrl } from "@/lib/user-profile";
 import UserSessionManager from "@/modules/UserSessionManager";
 
 interface SessionUser {
@@ -53,7 +54,7 @@ type AuthTab = "email" | "google";
 type EmailAuthMode = "signin" | "signup";
 type VerificationSource = "signup" | "signin" | "protected-route";
 
-const fallbackAvatar = "https://via.placeholder.com/40";
+const fallbackAvatar = DEFAULT_USER_AVATAR;
 
 const getSafeRedirectPath = (value: string | null): string => {
   if (!value || !value.startsWith("/") || value.startsWith("//")) {
@@ -192,7 +193,7 @@ export default function AuthPage() {
         user.displayName ||
         user.email?.split("@")[0] ||
         "User",
-      photoURL: data.user?.avatar || user.photoURL || fallbackAvatar,
+      photoURL: normalizeAvatarUrl(data.user?.avatar || user.photoURL || fallbackAvatar),
       providerIds:
         Array.isArray(data.user?.providerIds) && data.user.providerIds.length > 0
           ? data.user.providerIds
