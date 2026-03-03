@@ -53,6 +53,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const [invoice, setInvoice] = useState<InvoiceFormState>(
     createDefaultInvoiceFormState()
   );
+  const [isAiPanelVisible, setIsAiPanelVisible] = useState(false);
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
@@ -336,6 +337,17 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            {mode === "create" ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSaving}
+                onClick={() => setIsAiPanelVisible((previousState) => !previousState)}
+                className="w-full sm:w-auto"
+              >
+                {isAiPanelVisible ? "Hide AI Assistant" : "Show AI Assistant"}
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               disabled={isSaving}
@@ -364,7 +376,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
           </div>
         </div>
 
-        {mode === "create" ? (
+        {mode === "create" && isAiPanelVisible ? (
           <div className="mb-6">
             <InvoiceAiAssistant
               invoice={invoice}
