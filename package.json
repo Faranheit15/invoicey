@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint app components lib models modules --ext .ts,.tsx",
-    "migrate:provider-ids": "bun scripts/migrate-provider-ids.ts"
+    "migrate:provider-ids": "bun scripts/migrate-provider-ids.ts",
+    "migrate:tax-to-gst": "bun scripts/migrate-tax-to-gst.ts"
   },
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.6",

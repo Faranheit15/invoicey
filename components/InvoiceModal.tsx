@@ -62,9 +62,10 @@ export default function InvoiceModal({
     invoice.subtotal ??
     invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const discount = invoice.discount || 0;
-  const tax = invoice.tax || 0;
+  const cgst = invoice.cgst ?? invoice.tax ?? 0;
+  const sgst = invoice.sgst || 0;
   const convenienceCharge = invoice.convenienceCharge || 0;
-  const total = invoice.total || subtotal - discount + tax + convenienceCharge;
+  const total = invoice.total || subtotal - discount + cgst + sgst + convenienceCharge;
   const showCompanyLogo = Boolean(invoice.companyLogo?.trim()) && !logoLoadFailed;
 
   useEffect(() => {
@@ -303,8 +304,12 @@ export default function InvoiceModal({
                   <span>- {formatCurrency(discount, currency)}</span>
                 </div>
                 <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
-                  <span>Tax</span>
-                  <span>{formatCurrency(tax, currency)}</span>
+                  <span>CGST</span>
+                  <span>{formatCurrency(cgst, currency)}</span>
+                </div>
+                <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
+                  <span>SGST</span>
+                  <span>{formatCurrency(sgst, currency)}</span>
                 </div>
                 <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
                   <span>Service Charge</span>

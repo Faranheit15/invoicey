@@ -26,7 +26,9 @@ export interface InvoiceRecord {
   items: InvoiceLineItem[];
   subtotal?: number;
   discount?: number;
-  tax: number;
+  tax?: number;
+  cgst?: number;
+  sgst?: number;
   convenienceCharge: number;
   paymentInfo?: string;
   status?: InvoiceStatus;
@@ -59,7 +61,8 @@ export interface InvoiceFormState {
   status: InvoiceStatus;
   items: InvoiceFormItem[];
   discount: number;
-  tax: number;
+  cgst: number;
+  sgst: number;
   convenienceCharge: number;
   paymentInfo: string;
 }
@@ -82,7 +85,8 @@ export interface InvoicePayload {
   status: InvoiceStatus;
   items: InvoiceFormItem[];
   discount: number;
-  tax: number;
+  cgst: number;
+  sgst: number;
   convenienceCharge: number;
   paymentInfo: string;
 }
@@ -135,7 +139,8 @@ export const createDefaultInvoiceFormState = (): InvoiceFormState => {
     status: "draft",
     items: [{ description: "", quantity: 1, unitPrice: 0 }],
     discount: 0,
-    tax: 0,
+    cgst: 0,
+    sgst: 0,
     convenienceCharge: 0,
     paymentInfo: "",
   };
@@ -148,7 +153,8 @@ const toNumber = (value: unknown, fallback = 0): number => {
 
 export const calculateInvoiceTotals = (form: {
   items: InvoiceFormItem[];
-  tax: number;
+  cgst: number;
+  sgst: number;
   discount: number;
   convenienceCharge: number;
 }) => {
@@ -163,19 +169,21 @@ export const calculateInvoiceTotals = (form: {
   );
 
   const discount = Number(Math.max(0, form.discount || 0).toFixed(2));
-  const tax = Number(Math.max(0, form.tax || 0).toFixed(2));
+  const cgst = Number(Math.max(0, form.cgst || 0).toFixed(2));
+  const sgst = Number(Math.max(0, form.sgst || 0).toFixed(2));
   const convenienceCharge = Number(
     Math.max(0, form.convenienceCharge || 0).toFixed(2)
   );
 
   const total = Number(
-    Math.max(0, subtotal - discount + tax + convenienceCharge).toFixed(2)
+    Math.max(0, subtotal - discount + cgst + sgst + convenienceCharge).toFixed(2)
   );
 
   return {
     subtotal,
     discount,
-    tax,
+    cgst,
+    sgst,
     convenienceCharge,
     total,
   };
@@ -209,7 +217,8 @@ export const mapInvoiceRecordToFormState = (
           }))
         : [{ description: "", quantity: 1, unitPrice: 0 }],
     discount: toNumber(invoice.discount, 0),
-    tax: toNumber(invoice.tax, 0),
+    cgst: toNumber(invoice.cgst ?? invoice.tax, 0),
+    sgst: toNumber(invoice.sgst, 0),
     convenienceCharge: toNumber(invoice.convenienceCharge, 0),
     paymentInfo: invoice.paymentInfo || "",
   };
@@ -238,7 +247,8 @@ export const mapFormStateToPayload = (form: InvoiceFormState): InvoicePayload =>
       unitPrice: Math.max(0, toNumber(item.unitPrice, 0)),
     })),
     discount: Math.max(0, toNumber(form.discount, 0)),
-    tax: Math.max(0, toNumber(form.tax, 0)),
+    cgst: Math.max(0, toNumber(form.cgst, 0)),
+    sgst: Math.max(0, toNumber(form.sgst, 0)),
     convenienceCharge: Math.max(0, toNumber(form.convenienceCharge, 0)),
     paymentInfo: form.paymentInfo.trim(),
   };

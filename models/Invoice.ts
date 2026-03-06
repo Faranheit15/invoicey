@@ -19,7 +19,9 @@ export interface IInvoice extends Document {
   items: { name: string; price: number; quantity: number }[];
   subtotal: number;
   discount: number;
-  tax: number;
+  tax?: number;
+  cgst: number;
+  sgst: number;
   convenienceCharge: number;
   paymentInfo?: string;
   total: number;
@@ -53,7 +55,9 @@ const InvoiceSchema: Schema = new Schema({
   ],
   subtotal: { type: Number, required: true },
   discount: { type: Number, required: true, default: 0 },
-  tax: { type: Number, required: true },
+  tax: { type: Number, default: 0 },
+  cgst: { type: Number, required: true, default: 0 },
+  sgst: { type: Number, required: true, default: 0 },
   convenienceCharge: { type: Number, required: true },
   paymentInfo: { type: String, default: "" },
   total: { type: Number, required: true },

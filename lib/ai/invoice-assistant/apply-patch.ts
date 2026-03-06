@@ -139,13 +139,22 @@ export const applyInvoiceAssistantPatch = (
     appliedFields.push("discount");
   }
 
-  const tax = toNonNegativeNumber(patch.tax);
-  if (tax !== null) {
+  const cgst = toNonNegativeNumber(patch.cgst);
+  if (cgst !== null) {
     nextState = {
       ...nextState,
-      tax,
+      cgst,
     };
-    appliedFields.push("tax");
+    appliedFields.push("cgst");
+  }
+
+  const sgst = toNonNegativeNumber(patch.sgst);
+  if (sgst !== null) {
+    nextState = {
+      ...nextState,
+      sgst,
+    };
+    appliedFields.push("sgst");
   }
 
   const convenienceCharge = toNonNegativeNumber(patch.convenienceCharge);

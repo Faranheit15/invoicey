@@ -52,9 +52,10 @@ export const createInvoiceHtml = (
     invoice.subtotal ??
     invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const discount = invoice.discount || 0;
-  const tax = invoice.tax || 0;
+  const cgst = invoice.cgst ?? invoice.tax ?? 0;
+  const sgst = invoice.sgst || 0;
   const convenienceCharge = invoice.convenienceCharge || 0;
-  const total = invoice.total || subtotal - discount + tax + convenienceCharge;
+  const total = invoice.total || subtotal - discount + cgst + sgst + convenienceCharge;
   const status = getInvoiceStatus(invoice).toUpperCase();
   const currency = invoice.currency || "INR";
   const logoUrl = toSafeImageUrl(invoice.companyLogo);
@@ -378,8 +379,12 @@ export const createInvoiceHtml = (
               )}</td>
             </tr>
             <tr>
-              <td>Tax</td>
-              <td class="amount">${escapeHtml(formatCurrency(tax, currency))}</td>
+              <td>CGST</td>
+              <td class="amount">${escapeHtml(formatCurrency(cgst, currency))}</td>
+            </tr>
+            <tr>
+              <td>SGST</td>
+              <td class="amount">${escapeHtml(formatCurrency(sgst, currency))}</td>
             </tr>
             <tr>
               <td>Service Charge</td>
@@ -439,9 +444,10 @@ export const createInvoiceCsv = (invoice: InvoiceRecord) => {
     invoice.subtotal ??
     invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const discount = invoice.discount || 0;
-  const tax = invoice.tax || 0;
+  const cgst = invoice.cgst ?? invoice.tax ?? 0;
+  const sgst = invoice.sgst || 0;
   const serviceCharge = invoice.convenienceCharge || 0;
-  const total = invoice.total || subtotal - discount + tax + serviceCharge;
+  const total = invoice.total || subtotal - discount + cgst + sgst + serviceCharge;
 
   const rows = [
     ["Invoice Number", invoice.invoiceNumber],
@@ -461,7 +467,8 @@ export const createInvoiceCsv = (invoice: InvoiceRecord) => {
     [],
     ["Subtotal", String(subtotal.toFixed(2))],
     ["Discount", String(discount.toFixed(2))],
-    ["Tax", String(tax.toFixed(2))],
+    ["CGST", String(cgst.toFixed(2))],
+    ["SGST", String(sgst.toFixed(2))],
     ["Service Charge", String(serviceCharge.toFixed(2))],
     ["Total", String(total.toFixed(2))],
   ];

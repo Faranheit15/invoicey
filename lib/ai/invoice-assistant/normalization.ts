@@ -132,7 +132,7 @@ const buildPatch = (rawPatch: unknown): InvoiceAssistantPatch => {
   const patchObject = rawPatch as Record<string, unknown>;
   const patch: InvoiceAssistantPatch = {};
 
-  const stringFieldKeys: Array<keyof Omit<InvoiceFormState, "items" | "discount" | "tax" | "convenienceCharge" | "status">> =
+  const stringFieldKeys: Array<keyof Omit<InvoiceFormState, "items" | "discount" | "cgst" | "sgst" | "convenienceCharge" | "status">> =
     [
       "companyName",
       "companyEmail",
@@ -180,9 +180,14 @@ const buildPatch = (rawPatch: unknown): InvoiceAssistantPatch => {
     patch.discount = discount;
   }
 
-  const tax = toNonNegativeNumber(patchObject.tax);
-  if (tax !== undefined) {
-    patch.tax = tax;
+  const cgst = toNonNegativeNumber(patchObject.cgst);
+  if (cgst !== undefined) {
+    patch.cgst = cgst;
+  }
+
+  const sgst = toNonNegativeNumber(patchObject.sgst);
+  if (sgst !== undefined) {
+    patch.sgst = sgst;
   }
 
   const convenienceCharge = toNonNegativeNumber(patchObject.convenienceCharge);

@@ -32,6 +32,8 @@ interface RawInvoicePayload {
   items?: RawInvoiceItem[];
   discount?: number | string;
   tax?: number | string;
+  cgst?: number | string;
+  sgst?: number | string;
   convenienceCharge?: number | string;
   paymentInfo?: string;
   status?: InvoiceStatus;
@@ -61,7 +63,8 @@ interface NormalizedInvoicePayload {
   items: { name: string; quantity: number; price: number }[];
   subtotal: number;
   discount: number;
-  tax: number;
+  cgst: number;
+  sgst: number;
   convenienceCharge: number;
   paymentInfo: string;
   status: InvoiceStatus;
@@ -129,12 +132,13 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
       .toFixed(2)
   );
   const discount = Number(Math.max(0, toNumber(raw.discount, 0)).toFixed(2));
-  const tax = Number(Math.max(0, toNumber(raw.tax, 0)).toFixed(2));
+  const cgst = Number(Math.max(0, toNumber(raw.cgst, 0)).toFixed(2));
+  const sgst = Number(Math.max(0, toNumber(raw.sgst, 0)).toFixed(2));
   const convenienceCharge = Number(
     Math.max(0, toNumber(raw.convenienceCharge, 0)).toFixed(2)
   );
   const total = Number(
-    Math.max(0, subtotal - discount + tax + convenienceCharge).toFixed(2)
+    Math.max(0, subtotal - discount + cgst + sgst + convenienceCharge).toFixed(2)
   );
 
   const allowedStatuses: InvoiceStatus[] = ["draft", "sent", "paid", "overdue"];
@@ -159,7 +163,8 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
     items,
     subtotal,
     discount,
-    tax,
+    cgst,
+    sgst,
     convenienceCharge,
     paymentInfo: cleanString(raw.paymentInfo),
     status,
@@ -400,26 +405,23 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (rawPayload.action === "soft_delete") {
-      invoice.is_deleted = true;
-      await invoice.save();
+      await Invoice.updateOne({ _id: invoiceId }, { $set: { is_deleted: true } });
       return NextResponse.json({ message: "Invoice deleted successfully" });
     }
 
     if (rawPayload.action === "settle") {
-      invoice.status = "paid";
-      await invoice.save();
+      await Invoice.updateOne({ _id: invoiceId }, { $set: { status: "paid" } });
       return NextResponse.json({
         message: "Invoice settled successfully",
-        invoice,
+        invoice: { ...invoice.toObject(), status: "paid" },
       });
     }
 
     if (rawPayload.status && allowedStatuses.includes(rawPayload.status)) {
-      invoice.status = rawPayload.status;
-      await invoice.save();
+      await Invoice.updateOne({ _id: invoiceId }, { $set: { status: rawPayload.status } });
       return NextResponse.json({
         message: "Invoice status updated successfully",
-        invoice,
+        invoice: { ...invoice.toObject(), status: rawPayload.status },
       });
     }
 

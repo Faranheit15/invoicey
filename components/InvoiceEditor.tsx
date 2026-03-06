@@ -58,6 +58,10 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const [cgstMode, setCgstMode] = useState<"percent" | "amount">("amount");
+  const [sgstMode, setSgstMode] = useState<"percent" | "amount">("amount");
+  const [cgstRate, setCgstRate] = useState(0);
+  const [sgstRate, setSgstRate] = useState(0);
   const authRedirectPath = useMemo(() => {
     if (mode === "edit" && invoiceId) {
       return `/auth?next=${encodeURIComponent(`/create-invoice/${invoiceId}`)}`;
@@ -70,7 +74,8 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       calculateInvoiceTotals({
         items: invoice.items,
         discount: invoice.discount,
-        tax: invoice.tax,
+        cgst: invoice.cgst,
+        sgst: invoice.sgst,
         convenienceCharge: invoice.convenienceCharge,
       }),
     [invoice]
@@ -134,6 +139,26 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   useEffect(() => {
     setLogoLoadFailed(false);
   }, [invoice.companyLogo]);
+
+  useEffect(() => {
+    if (cgstMode !== "percent") {
+      return;
+    }
+    setInvoice((prev) => ({
+      ...prev,
+      cgst: Number(((cgstRate / 100) * totals.subtotal).toFixed(2)),
+    }));
+  }, [totals.subtotal, cgstMode, cgstRate]);
+
+  useEffect(() => {
+    if (sgstMode !== "percent") {
+      return;
+    }
+    setInvoice((prev) => ({
+      ...prev,
+      sgst: Number(((sgstRate / 100) * totals.subtotal).toFixed(2)),
+    }));
+  }, [totals.subtotal, sgstMode, sgstRate]);
 
   const getAuthTokenForAssistant = useCallback(async () => {
     if (!auth.currentUser) {
@@ -662,7 +687,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 </div>
               </section>
 
-              <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <section className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <label
                     htmlFor="discount"
@@ -688,26 +713,6 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 </div>
                 <div className="space-y-1.5">
                   <label
-                    htmlFor="tax"
-                    className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
-                  >
-                    Tax
-                  </label>
-                  <Input
-                    id="tax"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    placeholder="0.00"
-                    value={invoice.tax}
-                    onFocus={selectZeroValueOnFocus}
-                    onChange={(event) =>
-                      updateField("tax", Math.max(0, parseNumberInput(event.target.value, 0)))
-                    }
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label
                     htmlFor="service-charge"
                     className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
                   >
@@ -728,6 +733,110 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       )
                     }
                   />
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="cgst"
+                    className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                  >
+                    CGST
+                  </label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      id="cgst"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="0.00"
+                      value={cgstMode === "percent" ? cgstRate : invoice.cgst}
+                      onFocus={selectZeroValueOnFocus}
+                      onChange={(event) => {
+                        const val = Math.max(0, parseNumberInput(event.target.value, 0));
+                        if (cgstMode === "percent") {
+                          setCgstRate(val);
+                          updateField("cgst", Number(((val / 100) * totals.subtotal).toFixed(2)));
+                        } else {
+                          updateField("cgst", val);
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 px-3 font-mono text-xs"
+                      onClick={() => {
+                        if (cgstMode === "amount") {
+                          setCgstMode("percent");
+                          const rate = totals.subtotal > 0
+                            ? Number(((invoice.cgst / totals.subtotal) * 100).toFixed(2))
+                            : 0;
+                          setCgstRate(rate);
+                        } else {
+                          setCgstMode("amount");
+                        }
+                      }}
+                    >
+                      {cgstMode === "percent" ? "%" : "₹"}
+                    </Button>
+                  </div>
+                  {cgstMode === "percent" ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      = {formatCurrency(invoice.cgst, invoice.currency)}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="sgst"
+                    className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                  >
+                    SGST
+                  </label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      id="sgst"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="0.00"
+                      value={sgstMode === "percent" ? sgstRate : invoice.sgst}
+                      onFocus={selectZeroValueOnFocus}
+                      onChange={(event) => {
+                        const val = Math.max(0, parseNumberInput(event.target.value, 0));
+                        if (sgstMode === "percent") {
+                          setSgstRate(val);
+                          updateField("sgst", Number(((val / 100) * totals.subtotal).toFixed(2)));
+                        } else {
+                          updateField("sgst", val);
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 px-3 font-mono text-xs"
+                      onClick={() => {
+                        if (sgstMode === "amount") {
+                          setSgstMode("percent");
+                          const rate = totals.subtotal > 0
+                            ? Number(((invoice.sgst / totals.subtotal) * 100).toFixed(2))
+                            : 0;
+                          setSgstRate(rate);
+                        } else {
+                          setSgstMode("amount");
+                        }
+                      }}
+                    >
+                      {sgstMode === "percent" ? "%" : "₹"}
+                    </Button>
+                  </div>
+                  {sgstMode === "percent" ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      = {formatCurrency(invoice.sgst, invoice.currency)}
+                    </p>
+                  ) : null}
                 </div>
               </section>
 
@@ -858,8 +967,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     <span>- {formatCurrency(totals.discount, invoice.currency)}</span>
                   </div>
                   <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-                    <span>Tax</span>
-                    <span>{formatCurrency(totals.tax, invoice.currency)}</span>
+                    <span>CGST</span>
+                    <span>{formatCurrency(totals.cgst, invoice.currency)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
+                    <span>SGST</span>
+                    <span>{formatCurrency(totals.sgst, invoice.currency)}</span>
                   </div>
                   <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
                     <span>Service Charge</span>

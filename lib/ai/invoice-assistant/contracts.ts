@@ -24,7 +24,8 @@ export interface InvoiceAssistantPatch {
   currency?: string;
   items?: InvoiceFormItem[];
   discount?: number;
-  tax?: number;
+  cgst?: number;
+  sgst?: number;
   convenienceCharge?: number;
   paymentInfo?: string;
 }
