@@ -50,7 +50,8 @@ Output JSON schema:
     "currency"?: ${CURRENCY_OPTIONS.map((currency) => `"${currency}"`).join(" | ")},
     "items"?: Array<{"description": string, "quantity": number, "unitPrice": number}>,
     "discount"?: number,
-    "tax"?: number,
+    "cgst"?: number,
+    "sgst"?: number,
     "convenienceCharge"?: number,
     "paymentInfo"?: string
   }
@@ -67,6 +68,7 @@ Rules:
 8. Keep "assistantMessage" concise and practical.
 9. Keep status unchanged unless explicitly asked; do not emit status in patch.
 10. If currency is unknown, ask for clarification.
+11. Tax is expressed as CGST and SGST amounts (not percentages). When the user asks for a single tax (for example "include 10% tax"), compute the tax amount on the pre-tax subtotal and split it evenly between "cgst" and "sgst" (half each). Emit absolute amounts, never percentages, and never emit a "tax" field.
 `;
 
 const serializeConversation = (conversation: AssistantConversationEntry[]) => {

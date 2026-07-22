@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongodb";
 import Invoice from "@/models/Invoice";
-import admin, { ensureFirebaseAdmin } from "@/lib/firebase-admin";
+import { requireUser, authErrorResponse } from "@/lib/server/auth";
+import { computeTotals, validateInvoice } from "@/lib/invoice-domain";
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
 
@@ -71,38 +72,9 @@ interface NormalizedInvoicePayload {
   total: number;
 }
 
-const verifyAuth = async (req: NextRequest): Promise<string> => {
-  try {
-    ensureFirebaseAdmin();
-  } catch (error: unknown) {
-    throw new Error("AuthConfigurationError", { cause: error });
-  }
-
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    throw new Error("Unauthorized");
-  }
-
-  const token = authHeader.split("Bearer ")[1];
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    if (!decodedToken.uid) {
-      throw new Error("Unauthorized");
-    }
-    if (
-      decodedToken.firebase?.sign_in_provider === "password" &&
-      !decodedToken.email_verified
-    ) {
-      throw new Error("EmailNotVerified");
-    }
-    return decodedToken.uid;
-  } catch (error: unknown) {
-    if (error instanceof Error && error.message === "EmailNotVerified") {
-      throw error;
-    }
-    throw new Error("Unauthorized", { cause: error });
-  }
-};
+const INVOICE_AUTH_MESSAGES = {
+  EmailNotVerified: "Please verify your email before accessing invoices.",
+} as const;
 
 const toNumber = (value: number | string | undefined, fallback = 0): number => {
   const parsed = Number(value);
@@ -126,20 +98,18 @@ const normalizeItems = (items: RawInvoiceItem[] = []) => {
 
 const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
   const items = normalizeItems(raw.items || []);
-  const subtotal = Number(
-    items
-      .reduce((sum, item) => sum + item.quantity * item.price, 0)
-      .toFixed(2)
-  );
-  const discount = Number(Math.max(0, toNumber(raw.discount, 0)).toFixed(2));
-  const cgst = Number(Math.max(0, toNumber(raw.cgst, 0)).toFixed(2));
-  const sgst = Number(Math.max(0, toNumber(raw.sgst, 0)).toFixed(2));
-  const convenienceCharge = Number(
-    Math.max(0, toNumber(raw.convenienceCharge, 0)).toFixed(2)
-  );
-  const total = Number(
-    Math.max(0, subtotal - discount + cgst + sgst + convenienceCharge).toFixed(2)
-  );
+  // Single source of truth for the money math — the server never trusts client
+  // numbers, and this is the same formula the editor preview and export use.
+  const totals = computeTotals({
+    items: items.map((item) => ({
+      quantity: item.quantity,
+      unitPrice: item.price,
+    })),
+    discount: toNumber(raw.discount, 0),
+    cgst: toNumber(raw.cgst, 0),
+    sgst: toNumber(raw.sgst, 0),
+    convenienceCharge: toNumber(raw.convenienceCharge, 0),
+  });
 
   const allowedStatuses: InvoiceStatus[] = ["draft", "sent", "paid", "overdue"];
   const status =
@@ -161,44 +131,15 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
     notes: cleanString(raw.notes),
     currency: cleanString(raw.currency) || "INR",
     items,
-    subtotal,
-    discount,
-    cgst,
-    sgst,
-    convenienceCharge,
+    subtotal: totals.subtotal,
+    discount: totals.discount,
+    cgst: totals.cgst,
+    sgst: totals.sgst,
+    convenienceCharge: totals.convenienceCharge,
     paymentInfo: cleanString(raw.paymentInfo),
     status,
-    total,
+    total: totals.total,
   };
-};
-
-const isValidDate = (value: string): boolean => {
-  if (!value) {
-    return false;
-  }
-  return !Number.isNaN(new Date(value).getTime());
-};
-
-const validatePayload = (payload: NormalizedInvoicePayload): string | null => {
-  if (!payload.companyName) {
-    return "Company name is required";
-  }
-  if (!payload.billTo) {
-    return "Bill to is required";
-  }
-  if (!payload.invoiceNumber) {
-    return "Invoice number is required";
-  }
-  if (!isValidDate(payload.invoiceDate)) {
-    return "Invoice date is invalid";
-  }
-  if (!isValidDate(payload.dueDate)) {
-    return "Due date is invalid";
-  }
-  if (payload.items.length === 0) {
-    return "At least one line item is required";
-  }
-  return null;
 };
 
 const isNotFoundOrInvalidIdError = (error: unknown): boolean => {
@@ -208,30 +149,12 @@ const isNotFoundOrInvalidIdError = (error: unknown): boolean => {
 
 const allowedStatuses: InvoiceStatus[] = ["draft", "sent", "paid", "overdue"];
 
-const authErrorResponse = (error: unknown) => {
-  const err = error as Error;
-  if (err.message === "AuthConfigurationError") {
-    return NextResponse.json(
-      { error: "Server authentication is misconfigured" },
-      { status: 500 }
-    );
-  }
-  if (err.message === "EmailNotVerified") {
-    return NextResponse.json(
-      { error: "Please verify your email before accessing invoices." },
-      { status: 403 }
-    );
-  }
-
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-};
-
 export async function GET(req: NextRequest) {
   let userUid: string;
   try {
-    userUid = await verifyAuth(req);
+    userUid = await requireUser(req);
   } catch (error: unknown) {
-    return authErrorResponse(error);
+    return authErrorResponse(error, INVOICE_AUTH_MESSAGES);
   }
 
   await connectDB();
@@ -273,9 +196,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   let userUid: string;
   try {
-    userUid = await verifyAuth(req);
+    userUid = await requireUser(req);
   } catch (error: unknown) {
-    return authErrorResponse(error);
+    return authErrorResponse(error, INVOICE_AUTH_MESSAGES);
   }
 
   await connectDB();
@@ -283,7 +206,7 @@ export async function POST(req: NextRequest) {
   try {
     const rawPayload = (await req.json()) as RawInvoicePayload;
     const payload = normalizePayload(rawPayload);
-    const validationError = validatePayload(payload);
+    const validationError = validateInvoice(payload);
 
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
@@ -316,9 +239,9 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   let userUid: string;
   try {
-    userUid = await verifyAuth(req);
+    userUid = await requireUser(req);
   } catch (error: unknown) {
-    return authErrorResponse(error);
+    return authErrorResponse(error, INVOICE_AUTH_MESSAGES);
   }
 
   await connectDB();
@@ -345,7 +268,7 @@ export async function PUT(req: NextRequest) {
     }
 
     const payload = normalizePayload(rawPayload);
-    const validationError = validatePayload(payload);
+    const validationError = validateInvoice(payload);
 
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
@@ -375,9 +298,9 @@ export async function PUT(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   let userUid: string;
   try {
-    userUid = await verifyAuth(req);
+    userUid = await requireUser(req);
   } catch (error: unknown) {
-    return authErrorResponse(error);
+    return authErrorResponse(error, INVOICE_AUTH_MESSAGES);
   }
 
   await connectDB();
@@ -404,13 +327,18 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
+    // Scope every write by userId as well (defense in depth): the findOne above
+    // already proves ownership, but keeping the predicate on the write means a
+    // future refactor cannot silently turn these into cross-tenant updates.
+    const ownedFilter = { _id: invoiceId, userId: userUid };
+
     if (rawPayload.action === "soft_delete") {
-      await Invoice.updateOne({ _id: invoiceId }, { $set: { is_deleted: true } });
+      await Invoice.updateOne(ownedFilter, { $set: { is_deleted: true } });
       return NextResponse.json({ message: "Invoice deleted successfully" });
     }
 
     if (rawPayload.action === "settle") {
-      await Invoice.updateOne({ _id: invoiceId }, { $set: { status: "paid" } });
+      await Invoice.updateOne(ownedFilter, { $set: { status: "paid" } });
       return NextResponse.json({
         message: "Invoice settled successfully",
         invoice: { ...invoice.toObject(), status: "paid" },
@@ -418,7 +346,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (rawPayload.status && allowedStatuses.includes(rawPayload.status)) {
-      await Invoice.updateOne({ _id: invoiceId }, { $set: { status: rawPayload.status } });
+      await Invoice.updateOne(ownedFilter, { $set: { status: rawPayload.status } });
       return NextResponse.json({
         message: "Invoice status updated successfully",
         invoice: { ...invoice.toObject(), status: rawPayload.status },

@@ -1,3 +1,5 @@
+import { computeTotals } from "@/lib/invoice-domain";
+
 export type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
 
 export interface InvoiceLineItem {
@@ -157,37 +159,14 @@ export const calculateInvoiceTotals = (form: {
   sgst: number;
   discount: number;
   convenienceCharge: number;
-}) => {
-  const subtotal = Number(
-    form.items
-      .reduce(
-        (sum, item) =>
-          sum + Math.max(0, item.quantity || 0) * Math.max(0, item.unitPrice || 0),
-        0
-      )
-      .toFixed(2)
-  );
-
-  const discount = Number(Math.max(0, form.discount || 0).toFixed(2));
-  const cgst = Number(Math.max(0, form.cgst || 0).toFixed(2));
-  const sgst = Number(Math.max(0, form.sgst || 0).toFixed(2));
-  const convenienceCharge = Number(
-    Math.max(0, form.convenienceCharge || 0).toFixed(2)
-  );
-
-  const total = Number(
-    Math.max(0, subtotal - discount + cgst + sgst + convenienceCharge).toFixed(2)
-  );
-
-  return {
-    subtotal,
-    discount,
-    cgst,
-    sgst,
-    convenienceCharge,
-    total,
-  };
-};
+}) =>
+  computeTotals({
+    items: form.items,
+    discount: form.discount,
+    cgst: form.cgst,
+    sgst: form.sgst,
+    convenienceCharge: form.convenienceCharge,
+  });
 
 export const mapInvoiceRecordToFormState = (
   invoice: Partial<InvoiceRecord>

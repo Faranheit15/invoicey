@@ -74,9 +74,17 @@ export const syncUserWithMongo = async ({
     throw new Error("InvalidTokenPayload");
   }
 
-  const existingUser = (await User.findOne({
-    $or: [{ uid }, { email }],
-  })) as UserRecord | null;
+  // Only trust the token's email for account linking when Firebase has verified
+  // it. Matching/merging by an unverified email would let a token carrying a
+  // victim's email but a different uid adopt the victim's User row and trigger
+  // the invoice reassignment below — a full account takeover. When the email is
+  // unverified we match on uid only, so an attacker can never link into another
+  // account (and the unique email index makes a duplicate create fail closed).
+  const emailVerified = decodedToken.email_verified === true;
+
+  const existingUser = (await User.findOne(
+    emailVerified ? { $or: [{ uid }, { email }] } : { uid }
+  )) as UserRecord | null;
 
   const existingProviderIds = normalizeProviderIds(
     existingUser?.providerIds,

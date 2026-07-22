@@ -57,7 +57,15 @@ type VerificationSource = "signup" | "signin" | "protected-route";
 const fallbackAvatar = DEFAULT_USER_AVATAR;
 
 const getSafeRedirectPath = (value: string | null): string => {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+  // Must be a same-origin absolute path. Reject protocol-relative ("//host") and
+  // backslash tricks ("/\\host" or "\\host") — the URL parser normalizes "\" to
+  // "/", so "/\\evil.com" would otherwise resolve to the host "evil.com".
+  if (
+    !value ||
+    !value.startsWith("/") ||
+    value.includes("\\") ||
+    value[1] === "/"
+  ) {
     return "/dashboard";
   }
   return value;

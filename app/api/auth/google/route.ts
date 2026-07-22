@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import jwt from "jsonwebtoken";
 import connectDB from "@/lib/mongodb";
 import admin, { ensureFirebaseAdmin } from "@/lib/firebase-admin";
 import { syncUserWithMongo } from "@/lib/auth-user-sync";
-
-const getJwtSecret = (): string => {
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    throw new Error("Missing JWT_SECRET");
-  }
-  return jwtSecret;
-};
+import { signSessionToken } from "@/lib/server/session-token";
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,9 +28,7 @@ export async function POST(req: NextRequest) {
       providerId: "google.com",
     });
 
-    const sessionToken = jwt.sign({ uid, email }, getJwtSecret(), {
-      expiresIn: "7d",
-    });
+    const sessionToken = await signSessionToken({ uid, email });
 
     return NextResponse.json({
       sessionToken,

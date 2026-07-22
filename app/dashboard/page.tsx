@@ -12,14 +12,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { auth } from "@/lib/firebase";
-import { requiresEmailVerification } from "@/lib/auth-client";
+import {
+  invoicesApi,
+  ApiError,
+  UnauthenticatedError,
+} from "@/lib/api-client";
 import {
   InvoiceRecord,
   formatCurrency,
   formatDateLong,
   getInvoiceStatus,
 } from "@/lib/invoices";
+
+const DASHBOARD_AUTH_PATH = "/auth?next=%2Fdashboard";
 import {
   EyeOpenIcon,
   Pencil1Icon,
@@ -60,35 +65,23 @@ export default function DashboardPage() {
       setIsLoading(true);
       setLoadError("");
 
-      const currentUser = auth.currentUser;
-      if (!currentUser) {
-        router.replace("/auth?next=%2Fdashboard");
-        return;
-      }
-      if (requiresEmailVerification(currentUser)) {
-        setLoadError("Please verify your email before accessing your dashboard.");
-        router.replace("/auth?next=%2Fdashboard&reason=verify-email");
-        return;
-      }
-
-      const token = await currentUser.getIdToken();
-      const response = await fetch("/api/invoices", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const errorPayload = (await response.json()) as { error?: string };
-        setLoadError(errorPayload.error || "Failed to fetch invoices.");
-        setInvoices([]);
-        return;
-      }
-
-      const data = (await response.json()) as InvoiceRecord[];
+      const data = await invoicesApi.list();
       setInvoices(data || []);
-    } catch {
-      setLoadError("Failed to fetch invoices.");
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        if (error.reason === "verify-email") {
+          setLoadError(
+            "Please verify your email before accessing your dashboard."
+          );
+          router.replace(`${DASHBOARD_AUTH_PATH}&reason=verify-email`);
+        } else {
+          router.replace(DASHBOARD_AUTH_PATH);
+        }
+        return;
+      }
+      setLoadError(
+        error instanceof ApiError ? error.message : "Failed to fetch invoices."
+      );
       setInvoices([]);
     } finally {
       setIsLoading(false);
@@ -105,39 +98,21 @@ export default function DashboardPage() {
         setActiveActionInvoiceId(invoiceId);
         setLoadError("");
 
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          router.replace("/auth?next=%2Fdashboard");
-          return false;
-        }
-        if (requiresEmailVerification(currentUser)) {
-          setLoadError("Please verify your email before managing invoices.");
-          router.replace("/auth?next=%2Fdashboard&reason=verify-email");
-          return false;
-        }
-
-        const token = await currentUser.getIdToken();
-        const response = await fetch(
-          `/api/invoices?id=${encodeURIComponent(invoiceId)}`,
-          {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(payload),
-          }
-        );
-
-        if (!response.ok) {
-          const errorPayload = (await response.json()) as { error?: string };
-          setLoadError(errorPayload.error || "Failed to update invoice.");
-          return false;
-        }
-
+        await invoicesApi.patch(invoiceId, payload);
         return true;
-      } catch {
-        setLoadError("Failed to update invoice.");
+      } catch (error) {
+        if (error instanceof UnauthenticatedError) {
+          if (error.reason === "verify-email") {
+            setLoadError("Please verify your email before managing invoices.");
+            router.replace(`${DASHBOARD_AUTH_PATH}&reason=verify-email`);
+          } else {
+            router.replace(DASHBOARD_AUTH_PATH);
+          }
+          return false;
+        }
+        setLoadError(
+          error instanceof ApiError ? error.message : "Failed to update invoice."
+        );
         return false;
       } finally {
         setActiveActionInvoiceId(null);

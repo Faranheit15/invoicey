@@ -9,15 +9,19 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Textarea } from "@/components/ui/textarea";
 import InvoiceAiAssistant from "@/components/InvoiceAiAssistant";
-import { auth } from "@/lib/firebase";
-import { requiresEmailVerification } from "@/lib/auth-client";
+import {
+  invoicesApi,
+  getAuthToken,
+  ApiError,
+  UnauthenticatedError,
+} from "@/lib/api-client";
 import type { InvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/contracts";
 import { applyInvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/apply-patch";
+import { buildTotalsRows } from "@/lib/invoice-domain";
 import {
   CURRENCY_OPTIONS,
   InvoiceFormItem,
   InvoiceFormState,
-  InvoiceRecord,
   InvoiceStatus,
   calculateInvoiceTotals,
   createDefaultInvoiceFormState,
@@ -94,40 +98,23 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       }
 
       try {
-        if (!auth.currentUser) {
-          router.replace(authRedirectPath);
-          return;
-        }
-        if (requiresEmailVerification(auth.currentUser)) {
-          setError("Please verify your email before editing invoices.");
-          router.replace(`${authRedirectPath}&reason=verify-email`);
-          return;
-        }
-
-        const token = await auth.currentUser.getIdToken();
-        const response = await fetch(
-          `/api/invoices?id=${encodeURIComponent(invoiceId)}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+        const data = await invoicesApi.get(invoiceId);
+        setInvoice(mapInvoiceRecordToFormState(data));
+      } catch (err) {
+        if (err instanceof UnauthenticatedError) {
+          if (err.reason === "verify-email") {
+            setError("Please verify your email before editing invoices.");
+            router.replace(`${authRedirectPath}&reason=verify-email`);
+          } else {
+            router.replace(authRedirectPath);
           }
-        );
-
-        const data = (await response.json()) as InvoiceRecord | { error: string };
-
-        if (!response.ok) {
-          setError(
-            "error" in data
-              ? data.error
-              : "Unable to load invoice for editing."
-          );
           return;
         }
-
-        setInvoice(mapInvoiceRecordToFormState(data as InvoiceRecord));
-      } catch {
-        setError("Unable to load invoice for editing.");
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : "Unable to load invoice for editing."
+        );
       } finally {
         setIsLoadingInvoice(false);
       }
@@ -161,20 +148,18 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   }, [totals.subtotal, sgstMode, sgstRate]);
 
   const getAuthTokenForAssistant = useCallback(async () => {
-    if (!auth.currentUser) {
-      router.replace(authRedirectPath);
-      return null;
-    }
-    if (requiresEmailVerification(auth.currentUser)) {
-      setError("Please verify your email before using AI assistant.");
-      router.replace(`${authRedirectPath}&reason=verify-email`);
-      return null;
-    }
-
     try {
-      const token = await auth.currentUser.getIdToken();
-      return token;
-    } catch {
+      return await getAuthToken();
+    } catch (err) {
+      if (err instanceof UnauthenticatedError) {
+        if (err.reason === "verify-email") {
+          setError("Please verify your email before using AI assistant.");
+          router.replace(`${authRedirectPath}&reason=verify-email`);
+        } else {
+          router.replace(authRedirectPath);
+        }
+        return null;
+      }
       setError("Unable to verify your session. Please sign in again.");
       router.replace(authRedirectPath);
       return null;
@@ -280,45 +265,29 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     try {
       setIsSaving(true);
 
-      if (!auth.currentUser) {
-        router.replace(authRedirectPath);
-        return;
-      }
-      if (requiresEmailVerification(auth.currentUser)) {
-        setError("Please verify your email before saving invoices.");
-        router.replace(`${authRedirectPath}&reason=verify-email`);
-        return;
-      }
-
-      const token = await auth.currentUser.getIdToken();
       const payload = mapFormStateToPayload({
         ...invoice,
         status,
       });
 
-      const endpoint =
-        mode === "edit"
-          ? `/api/invoices?id=${encodeURIComponent(invoiceId || "")}`
-          : "/api/invoices";
-
-      const response = await fetch(endpoint, {
-        method: mode === "edit" ? "PUT" : "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const payloadError = (await response.json()) as { error?: string };
-        setError(payloadError.error || "Failed to save invoice.");
-        return;
+      if (mode === "edit") {
+        await invoicesApi.update(invoiceId || "", payload);
+      } else {
+        await invoicesApi.create(payload);
       }
 
       router.push("/dashboard");
-    } catch {
-      setError("Failed to save invoice.");
+    } catch (err) {
+      if (err instanceof UnauthenticatedError) {
+        if (err.reason === "verify-email") {
+          setError("Please verify your email before saving invoices.");
+          router.replace(`${authRedirectPath}&reason=verify-email`);
+        } else {
+          router.replace(authRedirectPath);
+        }
+        return;
+      }
+      setError(err instanceof ApiError ? err.message : "Failed to save invoice.");
     } finally {
       setIsSaving(false);
     }
@@ -958,30 +927,22 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 </div>
 
                 <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-                    <span>Subtotal</span>
-                    <span>{formatCurrency(totals.subtotal, invoice.currency)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-                    <span>Discount</span>
-                    <span>- {formatCurrency(totals.discount, invoice.currency)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-                    <span>CGST</span>
-                    <span>{formatCurrency(totals.cgst, invoice.currency)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-                    <span>SGST</span>
-                    <span>{formatCurrency(totals.sgst, invoice.currency)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-                    <span>Service Charge</span>
-                    <span>{formatCurrency(totals.convenienceCharge, invoice.currency)}</span>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-base font-semibold text-slate-900 dark:border-slate-700 dark:text-slate-100">
-                    <span>Total</span>
-                    <span>{formatCurrency(totals.total, invoice.currency)}</span>
-                  </div>
+                  {buildTotalsRows(totals).map((row) => (
+                    <div
+                      key={row.label}
+                      className={
+                        row.kind === "grand"
+                          ? "flex items-center justify-between border-t border-slate-200 pt-2 text-base font-semibold text-slate-900 dark:border-slate-700 dark:text-slate-100"
+                          : "flex items-center justify-between text-slate-600 dark:text-slate-300"
+                      }
+                    >
+                      <span>{row.label}</span>
+                      <span>
+                        {row.kind === "discount" ? "- " : ""}
+                        {formatCurrency(row.amount, invoice.currency)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </CardContent>

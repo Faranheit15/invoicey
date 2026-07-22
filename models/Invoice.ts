@@ -70,5 +70,11 @@ const InvoiceSchema: Schema = new Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Every read is `find({ userId, is_deleted }).sort({ createdAt: -1 })`.
+// This compound index turns those from collection scans into index scans.
+// Prod note: on an existing collection, build this in the background (off-hours)
+// so a foreground build does not lock the collection.
+InvoiceSchema.index({ userId: 1, is_deleted: 1, createdAt: -1 });
+
 export default mongoose.models.Invoice ||
   mongoose.model<IInvoice>("Invoice", InvoiceSchema);

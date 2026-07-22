@@ -1,22 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import jwt from "jsonwebtoken";
 import connectDB from "@/lib/mongodb";
 import admin, { ensureFirebaseAdmin } from "@/lib/firebase-admin";
 import { syncUserWithMongo } from "@/lib/auth-user-sync";
+import { signSessionToken } from "@/lib/server/session-token";
 
 interface SessionPayload {
   idToken?: string;
   providerId?: string;
   refreshToken?: string;
 }
-
-const getJwtSecret = (): string => {
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    throw new Error("Missing JWT_SECRET");
-  }
-  return jwtSecret;
-};
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,6 +23,19 @@ export async function POST(req: NextRequest) {
 
     const decodedToken = await admin.auth().verifyIdToken(idToken);
 
+    // Match the gate enforced on every data route: an unverified password
+    // account must not be able to mint a session or mutate persistent user
+    // state (User upsert, provider linking, invoice reassignment).
+    if (
+      decodedToken.firebase?.sign_in_provider === "password" &&
+      !decodedToken.email_verified
+    ) {
+      return NextResponse.json(
+        { error: "Please verify your email before signing in." },
+        { status: 403 }
+      );
+    }
+
     const { user, uid, email } = await syncUserWithMongo({
       decodedToken,
       idToken,
@@ -38,9 +43,7 @@ export async function POST(req: NextRequest) {
       refreshToken,
     });
 
-    const sessionToken = jwt.sign({ uid, email }, getJwtSecret(), {
-      expiresIn: "7d",
-    });
+    const sessionToken = await signSessionToken({ uid, email });
 
     return NextResponse.json({
       sessionToken,

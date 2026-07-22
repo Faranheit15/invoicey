@@ -1,3 +1,6 @@
+// Must be imported BEFORE firebase-admin: it aliases the removed Buffer.SlowBuffer
+// so firebase-admin's transitive `buffer-equal-constant-time` evaluates on Node 24+.
+import "@/lib/server/node-compat";
 import admin from "firebase-admin";
 
 const parseServiceAccount = () => {

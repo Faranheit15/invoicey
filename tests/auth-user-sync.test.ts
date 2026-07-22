@@ -1,0 +1,95 @@
+import { describe, it, expect, mock, beforeEach } from "bun:test";
+import type { DecodedIdToken } from "firebase-admin/auth";
+
+// Capture what queries/mutations the sync issues, without a real database.
+let lastFindOneQuery: unknown = null;
+let existingUserToReturn: Record<string, unknown> | null = null;
+const updateManyCalls: unknown[][] = [];
+
+const fakeUser = {
+  findOne: mock(async (query: unknown) => {
+    lastFindOneQuery = query;
+    return existingUserToReturn;
+  }),
+  create: mock(async (payload: Record<string, unknown>) => ({
+    _id: "new-id",
+    ...payload,
+  })),
+  findByIdAndUpdate: mock(async (_id: unknown, update: { $set: unknown }) => ({
+    _id,
+    ...(update.$set as Record<string, unknown>),
+  })),
+};
+
+const fakeInvoice = {
+  updateMany: mock(async (...args: unknown[]) => {
+    updateManyCalls.push(args);
+    return { modifiedCount: 0 };
+  }),
+};
+
+mock.module("@/models/User", () => ({ default: fakeUser }));
+mock.module("@/models/Invoice", () => ({ default: fakeInvoice }));
+
+const { syncUserWithMongo } = await import("@/lib/auth-user-sync");
+
+const decoded = (over: Partial<DecodedIdToken> & { email_verified?: boolean }) =>
+  ({
+    uid: "attacker-uid",
+    email: "victim@example.com",
+    firebase: { sign_in_provider: "password", identities: {} },
+    ...over,
+  }) as unknown as DecodedIdToken;
+
+beforeEach(() => {
+  lastFindOneQuery = null;
+  existingUserToReturn = null;
+  updateManyCalls.length = 0;
+});
+
+describe("syncUserWithMongo — account-linking safety", () => {
+  it("does NOT match by email when the token email is unverified (uid-only lookup)", async () => {
+    await syncUserWithMongo({
+      decodedToken: decoded({ email_verified: false }),
+      idToken: "tok",
+    });
+    expect(lastFindOneQuery).toEqual({ uid: "attacker-uid" });
+  });
+
+  it("matches by uid OR email when the token email is verified", async () => {
+    await syncUserWithMongo({
+      decodedToken: decoded({ email_verified: true }),
+      idToken: "tok",
+    });
+    expect(lastFindOneQuery).toEqual({
+      $or: [{ uid: "attacker-uid" }, { email: "victim@example.com" }],
+    });
+  });
+
+  it("never reassigns invoices for an unverified token even if a same-email row exists", async () => {
+    // Even if a victim row shared the email, the unverified path looks up by uid
+    // only, so it will not find (and therefore not adopt) the victim's account.
+    existingUserToReturn = null; // uid-only lookup finds nothing
+    await syncUserWithMongo({
+      decodedToken: decoded({ email_verified: false }),
+      idToken: "tok",
+    });
+    expect(updateManyCalls.length).toBe(0);
+  });
+
+  it("reassigns invoices only on a legitimate verified-email link with a changed uid", async () => {
+    existingUserToReturn = {
+      _id: "victim-row",
+      uid: "victim-uid",
+      email: "victim@example.com",
+    };
+    await syncUserWithMongo({
+      decodedToken: decoded({ email_verified: true }),
+      idToken: "tok",
+    });
+    expect(updateManyCalls[0]).toEqual([
+      { userId: "victim-uid" },
+      { $set: { userId: "attacker-uid" } },
+    ]);
+  });
+});

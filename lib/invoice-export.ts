@@ -4,6 +4,7 @@ import {
   formatDateLong,
   getInvoiceStatus,
 } from "@/lib/invoices";
+import { resolveRecordAmounts, buildTotalsRows } from "@/lib/invoice-domain";
 
 const escapeHtml = (value: string) => {
   return value
@@ -20,6 +21,16 @@ const toSafeValue = (value: string | undefined) => {
 
 const toLineBreaks = (value: string | undefined) => {
   return toSafeValue(value).replaceAll("\n", "<br />");
+};
+
+// Neutralize spreadsheet formula injection: a cell beginning with =, +, -, @,
+// tab or CR is treated as a formula by Excel/Sheets. Prefix such values with a
+// single quote so they are rendered as literal text.
+const neutralizeCsvValue = (value: string) => {
+  if (/^[=+\-@\t\r]/.test(value)) {
+    return `'${value}`;
+  }
+  return value;
 };
 
 const toSafeImageUrl = (value: string | undefined) => {
@@ -48,14 +59,7 @@ export const createInvoiceHtml = (
   invoice: InvoiceRecord,
   options: CreateInvoiceHtmlOptions = {}
 ) => {
-  const subtotal =
-    invoice.subtotal ??
-    invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0);
-  const discount = invoice.discount || 0;
-  const cgst = invoice.cgst ?? invoice.tax ?? 0;
-  const sgst = invoice.sgst || 0;
-  const convenienceCharge = invoice.convenienceCharge || 0;
-  const total = invoice.total || subtotal - discount + cgst + sgst + convenienceCharge;
+  const amounts = resolveRecordAmounts(invoice);
   const status = getInvoiceStatus(invoice).toUpperCase();
   const currency = invoice.currency || "INR";
   const logoUrl = toSafeImageUrl(invoice.companyLogo);
@@ -368,34 +372,18 @@ export const createInvoiceHtml = (
       <section class="summary">
         <table>
           <tbody>
-            <tr>
-              <td>Subtotal</td>
-              <td class="amount">${escapeHtml(formatCurrency(subtotal, currency))}</td>
-            </tr>
-            <tr>
-              <td>Discount</td>
-              <td class="amount">- ${escapeHtml(
-                formatCurrency(discount, currency)
-              )}</td>
-            </tr>
-            <tr>
-              <td>CGST</td>
-              <td class="amount">${escapeHtml(formatCurrency(cgst, currency))}</td>
-            </tr>
-            <tr>
-              <td>SGST</td>
-              <td class="amount">${escapeHtml(formatCurrency(sgst, currency))}</td>
-            </tr>
-            <tr>
-              <td>Service Charge</td>
-              <td class="amount">${escapeHtml(
-                formatCurrency(convenienceCharge, currency)
-              )}</td>
-            </tr>
-            <tr class="grand">
-              <td>Total</td>
-              <td class="amount">${escapeHtml(formatCurrency(total, currency))}</td>
-            </tr>
+            ${buildTotalsRows(amounts)
+              .map((row) => {
+                const prefix = row.kind === "discount" ? "- " : "";
+                const rowClass = row.kind === "grand" ? ' class="grand"' : "";
+                return `<tr${rowClass}>
+              <td>${row.label}</td>
+              <td class="amount">${prefix}${escapeHtml(
+                  formatCurrency(row.amount, currency)
+                )}</td>
+            </tr>`;
+              })
+              .join("\n            ")}
           </tbody>
         </table>
       </section>
@@ -440,14 +428,7 @@ export const createInvoiceHtml = (
 };
 
 export const createInvoiceCsv = (invoice: InvoiceRecord) => {
-  const subtotal =
-    invoice.subtotal ??
-    invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0);
-  const discount = invoice.discount || 0;
-  const cgst = invoice.cgst ?? invoice.tax ?? 0;
-  const sgst = invoice.sgst || 0;
-  const serviceCharge = invoice.convenienceCharge || 0;
-  const total = invoice.total || subtotal - discount + cgst + sgst + serviceCharge;
+  const amounts = resolveRecordAmounts(invoice);
 
   const rows = [
     ["Invoice Number", invoice.invoiceNumber],
@@ -465,12 +446,10 @@ export const createInvoiceCsv = (invoice: InvoiceRecord) => {
       String((item.price * item.quantity).toFixed(2)),
     ]),
     [],
-    ["Subtotal", String(subtotal.toFixed(2))],
-    ["Discount", String(discount.toFixed(2))],
-    ["CGST", String(cgst.toFixed(2))],
-    ["SGST", String(sgst.toFixed(2))],
-    ["Service Charge", String(serviceCharge.toFixed(2))],
-    ["Total", String(total.toFixed(2))],
+    ...buildTotalsRows(amounts).map((row) => [
+      row.label,
+      String(row.amount.toFixed(2)),
+    ]),
   ];
 
   return rows
@@ -480,7 +459,7 @@ export const createInvoiceCsv = (invoice: InvoiceRecord) => {
           if (cell === undefined) {
             return "";
           }
-          const value = String(cell);
+          const value = neutralizeCsvValue(String(cell));
           return `"${value.replaceAll('"', '""')}"`;
         })
         .join(",")

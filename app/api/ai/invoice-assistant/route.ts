@@ -1,60 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import admin, { ensureFirebaseAdmin } from "@/lib/firebase-admin";
+import { requireUser, authErrorResponse } from "@/lib/server/auth";
 import {
   generateInvoiceAssistantResponse,
   validateAssistantRequest,
 } from "@/lib/ai/invoice-assistant/service";
 
-const verifyAuth = async (req: NextRequest): Promise<string> => {
-  try {
-    ensureFirebaseAdmin();
-  } catch (error: unknown) {
-    throw new Error("AuthConfigurationError", { cause: error });
-  }
-
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    throw new Error("Unauthorized");
-  }
-
-  const token = authHeader.split("Bearer ")[1];
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    if (!decodedToken.uid) {
-      throw new Error("Unauthorized");
-    }
-    if (
-      decodedToken.firebase?.sign_in_provider === "password" &&
-      !decodedToken.email_verified
-    ) {
-      throw new Error("EmailNotVerified");
-    }
-    return decodedToken.uid;
-  } catch (error: unknown) {
-    if (error instanceof Error && error.message === "EmailNotVerified") {
-      throw error;
-    }
-    throw new Error("Unauthorized", { cause: error });
-  }
-};
-
-const authErrorResponse = (error: unknown) => {
-  const err = error as Error;
-  if (err.message === "AuthConfigurationError") {
-    return NextResponse.json(
-      { error: "Server authentication is misconfigured" },
-      { status: 500 }
-    );
-  }
-  if (err.message === "EmailNotVerified") {
-    return NextResponse.json(
-      { error: "Please verify your email before using AI invoice assistant." },
-      { status: 403 }
-    );
-  }
-
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-};
+const AI_AUTH_MESSAGES = {
+  EmailNotVerified:
+    "Please verify your email before using AI invoice assistant.",
+} as const;
 
 const isClientError = (message: string) => {
   return (
@@ -124,9 +78,9 @@ const classifyAiProviderError = (message: string) => {
 
 export async function POST(req: NextRequest) {
   try {
-    await verifyAuth(req);
+    await requireUser(req);
   } catch (error: unknown) {
-    return authErrorResponse(error);
+    return authErrorResponse(error, AI_AUTH_MESSAGES);
   }
 
   try {
