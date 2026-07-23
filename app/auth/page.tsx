@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { AlertBanner } from "@/components/ui/alert-banner";
+import { EyebrowBadge } from "@/components/ui/eyebrow-badge";
+import { PageShell } from "@/components/ui/page-shell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GridBackground } from "@/components/ui/aceternity/grid-background";
-import { Spotlight } from "@/components/ui/aceternity/spotlight";
 import {
   ArrowRightIcon,
   CheckCircledIcon,
@@ -416,23 +416,13 @@ export default function AuthPage() {
   };
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-100 px-4 py-14 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-10">
-      <Spotlight
-        className="-top-40 left-1/2 h-[28rem] w-[28rem] -translate-x-1/2 opacity-55"
-        fill="#0EA5E9"
-      />
-      <Spotlight
-        className="-right-24 bottom-0 h-[22rem] w-[22rem] opacity-40"
-        fill="#F97316"
-      />
-      <GridBackground className="opacity-70" />
+    <PageShell tone="marketing" counterweight="right">
 
       <div className="relative mx-auto grid w-full max-w-6xl gap-10 lg:grid-cols-[1fr_460px]">
         <section className="space-y-6 pt-6 lg:pt-12">
-          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:border-white/15 dark:bg-white/10 dark:text-sky-100">
-            <RocketIcon className="h-3.5 w-3.5" />
+          <EyebrowBadge icon={<RocketIcon className="h-3.5 w-3.5" />}>
             Invoicey Access
-          </span>
+          </EyebrowBadge>
           <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-slate-900 dark:text-white sm:text-5xl">
             Sign in and get back to shipping invoices.
           </h1>
@@ -495,7 +485,7 @@ export default function AuthPage() {
                   {isResendingVerification ? (
                     <>
                       <ReloadIcon className="mr-2 h-4 w-4 animate-spin" />
-                      Sending...
+                      Sending…
                     </>
                   ) : (
                     <>
@@ -577,7 +567,7 @@ export default function AuthPage() {
                           disabled={isResettingPassword}
                           className="text-xs font-medium text-sky-700 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-60 dark:text-sky-300 dark:hover:text-sky-200"
                         >
-                          {isResettingPassword ? "Sending..." : "Forgot password?"}
+                          {isResettingPassword ? "Sending…" : "Forgot password?"}
                         </button>
                       </div>
                       <Input
@@ -726,6 +716,6 @@ export default function AuthPage() {
           </CardContent>
         </Card>
       </div>
-    </main>
+    </PageShell>
   );
 }

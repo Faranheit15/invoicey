@@ -14,6 +14,7 @@ import {
 } from "@/lib/user-profile";
 import UserSessionManager from "@/modules/UserSessionManager";
 import { Button } from "@/components/ui/button";
+import { MicroLabel } from "@/components/ui/micro-label";
 import {
   THEME_STORAGE_KEY,
   Theme,
@@ -125,9 +126,9 @@ export default function Header() {
             <p className="text-base font-semibold text-slate-900 dark:text-slate-100">
               Invoicey
             </p>
-            <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <MicroLabel variant="meta">
               Billing OS
-            </p>
+            </MicroLabel>
           </div>
         </Link>
 

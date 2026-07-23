@@ -3,20 +3,16 @@
 import { Button } from "@/components/ui/button";
 import {
   InvoiceRecord,
+  InvoiceStatus,
   formatCurrency,
   formatDateLong,
   getInvoiceStatus,
 } from "@/lib/invoices";
+import {
+  STATUS_PILL_BASE,
+  statusPillClass,
+} from "@/lib/invoice-status";
 import { EyeOpenIcon, Pencil1Icon } from "@radix-ui/react-icons";
-
-type InvoiceStatusKey = ReturnType<typeof getInvoiceStatus>;
-
-export const statusClassName: Record<InvoiceStatusKey, string> = {
-  draft: "bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200",
-  sent: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200",
-  paid: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/45 dark:text-emerald-200",
-  overdue: "bg-rose-100 text-rose-700 dark:bg-rose-900/45 dark:text-rose-200",
-};
 
 export interface InvoiceActionHandlers {
   onView: () => void;
@@ -27,7 +23,7 @@ export interface InvoiceActionHandlers {
 
 interface RowActionsProps extends InvoiceActionHandlers {
   invoice: InvoiceRecord;
-  status: InvoiceStatusKey;
+  status: InvoiceStatus;
   isActioning: boolean;
   /** Cards give each control a full 44px touch target; table rows stay compact. */
   touch?: boolean;
@@ -141,7 +137,7 @@ export function InvoiceCardList({
                 </p>
               </div>
               <span
-                className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold uppercase ${statusClassName[status]}`}
+                className={`${STATUS_PILL_BASE} shrink-0 ${statusPillClass[status]}`}
               >
                 {status}
               </span>

@@ -205,7 +205,7 @@ The practical result is benign — that stack resolves to Segoe UI Variable on W
 
 ### Named Rules
 
-**The Uppercase-Label Rule.** Small text earns legibility from letterspacing, not weight or color. Any label below `0.75rem` is uppercase with tracking of at least `0.05em` and set in `{colors.muted-foreground}`. This is the most consistent single behavior across all three registers.
+**The Uppercase-Label Rule.** Small text earns legibility from letterspacing, not weight or color. Any label below `0.75rem` is uppercase with tracking of at least `0.05em` and set in `{colors.muted-foreground}`. This is the most consistent single behavior across all three registers. Reach for `MicroLabel` rather than re-typing the classes; `tracking-eyebrow` (`0.18em`) is the one arbitrary tracking value the system keeps, and it is a theme token, not a bracket literal.
 
 **The Numbers-Are-Semibold Rule.** Every money figure — dashboard stat, table amount, preview total, document grand total — is weight 600 or 700 against 400 body text. Amounts are never the same weight as the label describing them.
 
@@ -310,12 +310,34 @@ Because the template is a raw string it does its own escaping — every interpol
 The editor's JSX counterpart to the exported sheet — a card whose body opens with a near-black `p-5` header band in near-white text, then mirrors the document's address boxes, item table, and totals stack in app tokens. It is a **separate rendering** from the export template and the two can drift on layout and fields; only their totals rows are guaranteed identical, because both are built from `buildTotalsRows` in `lib/invoice-domain.ts`.
 
 ### Atmosphere Primitives
-Two presentational components used only on marketing surfaces:
+Two low-level presentational components, used only on marketing surfaces:
 
 - **Spotlight** — an absolutely-positioned `blur-3xl` circle filled with a `radial-gradient(circle at center, <fill> 0%, transparent 65%)`. Composed in pairs or triples at 35–60% opacity, one sky and one orange, bled off opposite page edges.
 - **GridBackground** — a 44px square grid drawn in `rgba(148, 163, 184, 0.12)`, faded by a `radial-gradient(ellipse at center, black 55%, transparent 100%)` mask so it never reaches the page edge. Always at `opacity-70`.
 
-Both are `pointer-events-none` and purely decorative.
+Both are `pointer-events-none` and purely decorative. **Compose them through `Atmosphere`, not directly** — see below.
+
+## Shared Primitives
+
+Four components own patterns that were previously re-typed at each call site. They are the system's enforcement points: a new surface that reaches past them is drifting.
+
+### MicroLabel ([components/ui/micro-label.tsx](components/ui/micro-label.tsx))
+The uppercase micro-label described under Typography. It existed as **39 uses across 14 distinct class strings**, drifting in size (11 vs 12px), tracking (`wide` / `wider` / `0.18em` / `0.2em`) and colour (`slate-500` vs `slate-600`) with no intent behind the differences.
+
+Variants are named for role, not appearance, so a caller must choose a meaning rather than invent a combination: `section` (groups a form or page section; pair with `as="h2"`), `meta` (names the value beneath it), `onDark` (sits on the invoice masthead in both themes), `accent` (carries the sky tint on tinted surfaces).
+
+### EyebrowBadge ([components/ui/eyebrow-badge.tsx](components/ui/eyebrow-badge.tsx))
+The kicker pill opening every marketing surface and the auth page — five identical 200-character class strings where only the icon and label changed. It is a badge, not a heading.
+
+### PageShell ([components/ui/page-shell.tsx](components/ui/page-shell.tsx))
+The outermost `<main>`. Both registers had their shell copy-pasted: four marketing files shared one byte-identical 140-character class string, two app files shared another. `tone` is `marketing` (flat slate ground, `py-14`, atmosphere included), `app` (vertical gradient, `py-8`), or `bare` (the landing page, which owns its own section padding). The `px-4 sm:px-6 lg:px-10` ramp is applied once, here.
+
+### Atmosphere ([components/ui/atmosphere.tsx](components/ui/atmosphere.tsx))
+The marketing register's background light: sky spotlight off the top centre, orange counterweight in a bottom corner, masked grid at 70%. Five surfaces composed this by hand and the numbers drifted — sky opacity ran 0.55 / 0.58 / 0.60, diameter 28 / 30 / 34rem, orange 22 / 24rem at 0.35 / 0.40. Those were transcription noise and are now settled.
+
+Two real variations survive as props: `counterweight` picks the bottom corner (pages alternate it), and `extended` is the landing hero, where the third sky glow appears and the orange moves to mid-left to light the copy column — a composition decision rather than noise.
+
+**This is where the Atmosphere-Not-Object Rule becomes enforceable.** A surface that wants brand colour reaches for this component, not for a tinted control.
 
 ## Do's and Don'ts
 

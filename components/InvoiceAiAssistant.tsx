@@ -186,7 +186,7 @@ export default function InvoiceAiAssistant({
               {isGenerating ? (
                 <>
                   <ReloadIcon className="h-4 w-4 animate-spin" />
-                  Generating
+                  Generating…
                 </>
               ) : (
                 <>

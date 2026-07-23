@@ -13,12 +13,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AlertBanner } from "@/components/ui/alert-banner";
+import { PageShell } from "@/components/ui/page-shell";
 import { ConfirmDialog } from "@/components/ui/modal";
 import {
   InvoiceCardList,
   InvoiceRowActions,
-  statusClassName,
-} from "@/components/InvoiceRowActions";
+} from "@/components/InvoiceList";
+import { STATUS_PILL_BASE, statusPillClass } from "@/lib/invoice-status";
 import {
   invoicesApi,
   describeRequestError,
@@ -35,7 +36,6 @@ const DASHBOARD_AUTH_PATH = "/auth?next=%2Fdashboard";
 import { PlusIcon, ReloadIcon } from "@radix-ui/react-icons";
 import InvoiceModal from "@/components/InvoiceModal";
 import UserSessionManager from "@/modules/UserSessionManager";
-
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -201,7 +201,7 @@ export default function DashboardPage() {
   }, [invoices]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-white px-4 py-8 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 sm:px-6 lg:px-10">
+    <PageShell tone="app">
       <div className="mx-auto space-y-6 max-w-7xl">
         <section className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -300,7 +300,7 @@ export default function DashboardPage() {
             {isLoading ? (
               <div className="flex items-center gap-2 px-6 py-8 text-slate-600 dark:text-slate-300">
                 <ReloadIcon className="w-4 h-4 animate-spin" />
-                Loading invoices...
+                Loading invoices…
               </div>
             ) : invoices.length ? (
               <>
@@ -349,7 +349,7 @@ export default function DashboardPage() {
                         </TableCell>
                         <TableCell>
                           <span
-                            className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold uppercase ${statusClassName[status]}`}
+                            className={`${STATUS_PILL_BASE} ${statusPillClass[status]}`}
                           >
                             {status}
                           </span>
@@ -437,6 +437,6 @@ export default function DashboardPage() {
           }}
         />
       ) : null}
-    </main>
+    </PageShell>
   );
 }

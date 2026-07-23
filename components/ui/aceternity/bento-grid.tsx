@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { MicroLabel } from "@/components/ui/micro-label";
 import type { ReactNode } from "react";
 
 interface BentoGridProps {
@@ -50,9 +51,9 @@ export function BentoGridItem({
           </div>
         ) : null}
         {eyebrow ? (
-          <p className="mt-3 text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+          <MicroLabel variant="meta" className="mt-3">
             {eyebrow}
-          </p>
+          </MicroLabel>
         ) : null}
         <h3 className="mt-2 text-lg font-semibold text-slate-900 dark:text-white">
           {title}

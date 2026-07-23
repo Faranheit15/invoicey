@@ -2,8 +2,11 @@ import Link from "next/link";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { BentoGrid, BentoGridItem } from "@/components/ui/aceternity/bento-grid";
-import { GridBackground } from "@/components/ui/aceternity/grid-background";
-import { Spotlight } from "@/components/ui/aceternity/spotlight";
+import { Atmosphere } from "@/components/ui/atmosphere";
+import { EyebrowBadge } from "@/components/ui/eyebrow-badge";
+import { MicroLabel } from "@/components/ui/micro-label";
+import { PageShell } from "@/components/ui/page-shell";
+import { STATUS_PILL_BASE, statusPillClass } from "@/lib/invoice-status";
 import {
   ArrowRightIcon,
   CheckCircledIcon,
@@ -78,28 +81,15 @@ const quips = [
 
 export default function LandingPage() {
   return (
-    <main className="relative overflow-hidden bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <Spotlight
-        className="-top-48 left-1/2 h-[34rem] w-[34rem] -translate-x-1/2 opacity-60"
-        fill="#0EA5E9"
-      />
-      <Spotlight
-        className="-left-32 top-56 h-[24rem] w-[24rem] opacity-40"
-        fill="#F97316"
-      />
-      <Spotlight
-        className="-right-32 bottom-20 h-[26rem] w-[26rem] opacity-35"
-        fill="#38BDF8"
-      />
-      <GridBackground className="opacity-70" />
+    <PageShell tone="bare">
+      <Atmosphere extended />
 
       <section className="relative px-4 pt-16 pb-14 sm:px-6 sm:pt-20 lg:px-10 lg:pt-24">
         <div className="mx-auto grid w-full max-w-7xl items-start gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:gap-14">
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:border-white/15 dark:bg-white/10 dark:text-sky-100">
-              <RocketIcon className="h-3.5 w-3.5" />
+            <EyebrowBadge icon={<RocketIcon className="h-3.5 w-3.5" />}>
               Invoicey
-            </span>
+            </EyebrowBadge>
 
             <h1 className="mt-5 text-balance text-4xl font-semibold leading-[1.05] text-slate-900 dark:text-white sm:text-5xl lg:text-6xl">
               Build serious invoices fast, free and hassle-free.
@@ -158,31 +148,36 @@ export default function LandingPage() {
             <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-[0_30px_80px_rgba(2,6,23,0.18)] dark:border-white/15 dark:bg-slate-900/85 dark:shadow-[0_30px_80px_rgba(2,6,23,0.55)] sm:p-6">
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4 dark:border-white/10">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  <MicroLabel variant="meta">
                     Preview
-                  </p>
+                  </MicroLabel>
                   <h2 className="mt-1 text-2xl font-semibold text-slate-900 dark:text-white">
                     INV-849231
                   </h2>
                 </div>
-                <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-200">
+                {/* Uses the app's own status pill, not a bespoke pair. The old
+                    emerald-200-on-emerald-400/15 had no light variant and
+                    measured 1.15:1 against the card's white background. */}
+                <span
+                  className={`${STATUS_PILL_BASE} px-3 tracking-wide ${statusPillClass.paid}`}
+                >
                   Paid
                 </span>
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-4 text-sm text-slate-700 dark:text-slate-200">
                 <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <MicroLabel variant="meta">
                     Client
-                  </p>
+                  </MicroLabel>
                   <p className="mt-1 font-medium text-slate-900 dark:text-white">
                     Acme Manufacturing
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <MicroLabel variant="meta">
                     Total
-                  </p>
+                  </MicroLabel>
                   <p className="mt-1 text-xl font-semibold text-slate-900 dark:text-white">
                     ₹2,48,400
                   </p>
@@ -220,9 +215,9 @@ export default function LandingPage() {
       <section className="relative px-4 pb-16 sm:px-6 lg:px-10 lg:pb-20">
         <div className="mx-auto w-full max-w-7xl">
           <div className="mb-6 max-w-2xl">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+            <MicroLabel variant="meta">
               Product Surface
-            </p>
+            </MicroLabel>
             <h2 className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white sm:text-3xl">
               Designed to feel like a real product, not a toy generator.
             </h2>
@@ -242,6 +237,6 @@ export default function LandingPage() {
           </BentoGrid>
         </div>
       </section>
-    </main>
+    </PageShell>
   );
 }

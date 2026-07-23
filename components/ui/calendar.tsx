@@ -34,8 +34,9 @@ function Calendar({
         ),
         month_grid: "w-full border-collapse",
         weekdays: "flex",
-        weekday:
-          "w-9 rounded-md text-[0.8rem] font-normal text-muted-foreground",
+        // text-xs (0.75rem), not shadcn's default 0.8rem: 12.8px sat between
+        // two ramp steps for no reason, in a control used on every invoice.
+        weekday: "w-9 rounded-md text-xs font-normal text-muted-foreground",
         week: "mt-2 flex w-full",
         day: cn(
           buttonVariants({ variant: "ghost" }),

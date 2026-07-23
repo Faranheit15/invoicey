@@ -1,7 +1,7 @@
 import Link from "next/link";
+import { EyebrowBadge } from "@/components/ui/eyebrow-badge";
+import { PageShell } from "@/components/ui/page-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { GridBackground } from "@/components/ui/aceternity/grid-background";
-import { Spotlight } from "@/components/ui/aceternity/spotlight";
 import {
   GitHubLogoIcon,
   LinkedInLogoIcon,
@@ -32,23 +32,12 @@ const contactLinks = [
 
 export default function ContactPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-100 px-4 py-14 text-slate-900 dark:bg-slate-950 dark:text-slate-100 sm:px-6 lg:px-10">
-      <Spotlight
-        className="-top-40 left-1/2 h-[30rem] w-[30rem] -translate-x-1/2 opacity-58"
-        fill="#0EA5E9"
-      />
-      <Spotlight
-        className="-left-24 bottom-6 h-[22rem] w-[22rem] opacity-35"
-        fill="#F97316"
-      />
-      <GridBackground className="opacity-70" />
-
+    <PageShell tone="marketing">
       <section className="relative mx-auto max-w-5xl">
         <div className="mx-auto max-w-2xl text-center">
-          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:border-white/15 dark:bg-white/10 dark:text-sky-100">
-            <RocketIcon className="h-3.5 w-3.5" />
+          <EyebrowBadge icon={<RocketIcon className="h-3.5 w-3.5" />}>
             Contact
-          </span>
+          </EyebrowBadge>
           <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-900 dark:text-white sm:text-5xl">
             Reach out and follow the product journey.
           </h1>
@@ -84,6 +73,6 @@ export default function ContactPage() {
           ))}
         </div>
       </section>
-    </main>
+    </PageShell>
   );
 }

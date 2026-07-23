@@ -3,7 +3,12 @@
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalCloseButton } from "@/components/ui/modal";
+import {
+  STATUS_PILL_BASE,
+  statusPillOnMastheadClass,
+} from "@/lib/invoice-status";
 import { AlertBanner } from "@/components/ui/alert-banner";
+import { MicroLabel } from "@/components/ui/micro-label";
 import {
   createInvoiceCsv,
   createInvoiceHtml,
@@ -28,15 +33,6 @@ interface InvoiceModalProps {
   onDelete?: (invoiceId: string) => Promise<void> | void;
   isMutating?: boolean;
 }
-
-// Rendered on the invoice sheet's near-black masthead in both themes, so these
-// stay light-on-dark rather than inverting with the page.
-const statusClassName = {
-  draft: "bg-slate-100 text-slate-700",
-  sent: "bg-blue-100 text-blue-700",
-  paid: "bg-emerald-100 text-emerald-700",
-  overdue: "bg-rose-100 text-rose-700",
-};
 
 const downloadBlob = (filename: string, content: string, type: string) => {
   const blob = new Blob([content], { type });
@@ -129,9 +125,9 @@ export default function InvoiceModal({
       <div className="flex flex-col max-h-[95vh]">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-700 dark:bg-slate-900">
           <div className="min-w-0">
-            <p className="text-xs tracking-wider uppercase text-slate-500 dark:text-slate-400">
+            <MicroLabel as="p" variant="section">
               Invoice
-            </p>
+            </MicroLabel>
             <h2
               id={titleId}
               className="truncate text-xl font-semibold text-slate-900 dark:text-slate-100"
@@ -200,7 +196,7 @@ export default function InvoiceModal({
           <article className="mx-auto max-w-4xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-950">
             <header className="flex flex-wrap justify-between gap-5 border-b border-slate-200 bg-slate-900 px-6 py-6 text-slate-100 sm:px-8 dark:border-slate-700">
               <div>
-                <p className="text-xs tracking-[0.2em] uppercase text-slate-300">Invoice</p>
+                <MicroLabel variant="onDark">Invoice</MicroLabel>
                 <h3 className="mt-1 text-2xl font-semibold">{invoice.invoiceNumber}</h3>
                 <p className="mt-3 text-sm text-slate-300">
                   Issued by <span className="font-medium text-white">{invoice.companyName}</span>
@@ -228,7 +224,7 @@ export default function InvoiceModal({
                   </div>
                 </div>
                 <span
-                  className={`inline-flex rounded-full px-3 py-1 mt-4 text-xs font-semibold uppercase ${statusClassName[status]}`}
+                  className={`${STATUS_PILL_BASE} mt-4 px-3 ${statusPillOnMastheadClass[status]}`}
                 >
                   {status}
                 </span>
@@ -237,9 +233,9 @@ export default function InvoiceModal({
 
             <section className="grid gap-4 border-b border-slate-200 px-6 py-5 sm:grid-cols-2 sm:px-8 dark:border-slate-700">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
+                <MicroLabel as="p" variant="section">
                   Bill From
-                </p>
+                </MicroLabel>
                 <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
                   {invoice.companyName}
                 </p>
@@ -260,9 +256,9 @@ export default function InvoiceModal({
                 ) : null}
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-                <p className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
+                <MicroLabel as="p" variant="section">
                   Bill To
-                </p>
+                </MicroLabel>
                 <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
                   {invoice.billTo}
                 </p>
@@ -344,9 +340,9 @@ export default function InvoiceModal({
               <section className="grid gap-4 border-t border-slate-200 px-6 py-5 sm:grid-cols-3 sm:px-8 dark:border-slate-700">
                 {invoice.terms ? (
                   <div>
-                    <h4 className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
+                    <MicroLabel as="h4" variant="section">
                       Terms
-                    </h4>
+                    </MicroLabel>
                     <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                       {invoice.terms}
                     </p>
@@ -354,9 +350,9 @@ export default function InvoiceModal({
                 ) : null}
                 {invoice.paymentInfo ? (
                   <div>
-                    <h4 className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
+                    <MicroLabel as="h4" variant="section">
                       Payment Information
-                    </h4>
+                    </MicroLabel>
                     <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                       {invoice.paymentInfo}
                     </p>
@@ -364,9 +360,9 @@ export default function InvoiceModal({
                 ) : null}
                 {invoice.notes ? (
                   <div>
-                    <h4 className="text-xs font-semibold tracking-wider uppercase text-slate-500 dark:text-slate-400">
+                    <MicroLabel as="h4" variant="section">
                       Notes
-                    </h4>
+                    </MicroLabel>
                     <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                       {invoice.notes}
                     </p>
