@@ -15,6 +15,11 @@ import {
 import { AlertBanner } from "@/components/ui/alert-banner";
 import { ConfirmDialog } from "@/components/ui/modal";
 import {
+  InvoiceCardList,
+  InvoiceRowActions,
+  statusClassName,
+} from "@/components/InvoiceRowActions";
+import {
   invoicesApi,
   describeRequestError,
   UnauthenticatedError,
@@ -27,23 +32,10 @@ import {
 } from "@/lib/invoices";
 
 const DASHBOARD_AUTH_PATH = "/auth?next=%2Fdashboard";
-import {
-  EyeOpenIcon,
-  Pencil1Icon,
-  PlusIcon,
-  ReloadIcon,
-} from "@radix-ui/react-icons";
+import { PlusIcon, ReloadIcon } from "@radix-ui/react-icons";
 import InvoiceModal from "@/components/InvoiceModal";
 import UserSessionManager from "@/modules/UserSessionManager";
 
-const statusClassName = {
-  draft:
-    "bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200",
-  sent: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-200",
-  paid:
-    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/45 dark:text-emerald-200",
-  overdue: "bg-rose-100 text-rose-700 dark:bg-rose-900/45 dark:text-rose-200",
-};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -311,9 +303,24 @@ export default function DashboardPage() {
                 Loading invoices...
               </div>
             ) : invoices.length ? (
-              // min-w keeps money and date columns at a readable width and lets
-              // the wrapper scroll, instead of crushing seven columns into 375px.
-              <Table className="min-w-[920px]">
+              <>
+                <InvoiceCardList
+                  className="md:hidden"
+                  invoices={invoices}
+                  activeActionInvoiceId={activeActionInvoiceId}
+                  handlersFor={(invoice) => ({
+                    onView: () => setSelectedInvoice(invoice),
+                    onEdit: () => router.push(`/create-invoice/${invoice._id}`),
+                    onSettle: () => settleInvoice(invoice._id),
+                    onDelete: () => setPendingDelete(invoice),
+                  })}
+                />
+
+                {/* From md the table earns its place: seven columns compared
+                    down a page is the whole point of a dashboard. min-w keeps
+                    money and dates readable and lets the wrapper scroll rather
+                    than crushing columns. */}
+                <Table className="hidden min-w-[920px] md:table">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Invoice</TableHead>
@@ -358,54 +365,25 @@ export default function DashboardPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setSelectedInvoice(invoice)}
-                              disabled={isActioning}
-                              aria-label={`View ${invoice.invoiceNumber}`}
-                            >
-                              <EyeOpenIcon className="w-4 h-4" />
-                              View
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => router.push(`/create-invoice/${invoice._id}`)}
-                              disabled={isActioning}
-                              aria-label={`Edit ${invoice.invoiceNumber}`}
-                            >
-                              <Pencil1Icon className="w-4 h-4" />
-                              Edit
-                            </Button>
-                            {status !== "paid" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => settleInvoice(invoice._id)}
-                                disabled={isActioning}
-                                aria-label={`Mark ${invoice.invoiceNumber} as paid`}
-                              >
-                                Settle
-                              </Button>
-                            ) : null}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:border-rose-500/50 dark:text-rose-300 dark:hover:bg-rose-500/20 dark:hover:text-rose-200"
-                              onClick={() => setPendingDelete(invoice)}
-                              disabled={isActioning}
-                              aria-label={`Delete ${invoice.invoiceNumber}`}
-                            >
-                              Delete
-                            </Button>
+                            <InvoiceRowActions
+                              invoice={invoice}
+                              status={status}
+                              isActioning={isActioning}
+                              onView={() => setSelectedInvoice(invoice)}
+                              onEdit={() =>
+                                router.push(`/create-invoice/${invoice._id}`)
+                              }
+                              onSettle={() => settleInvoice(invoice._id)}
+                              onDelete={() => setPendingDelete(invoice)}
+                            />
                           </div>
                         </TableCell>
                       </TableRow>
                     );
                   })}
                 </TableBody>
-              </Table>
+                </Table>
+              </>
             ) : loadError ? null : (
               <div className="px-6 py-12 text-center">
                 <p className="text-base font-medium text-slate-800 dark:text-slate-100">

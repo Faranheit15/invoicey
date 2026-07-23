@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -10,6 +10,15 @@ import { THEME_INIT_SCRIPT } from "@/lib/theme";
 export const metadata: Metadata = {
   title: "Invoicey",
   description: "Create invoices fast and easily",
+};
+
+// viewport-fit=cover lets the page reach the physical screen edges on notched
+// phones; globals.css then pays the safe-area insets back where content would
+// otherwise sit under the notch or the home indicator.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

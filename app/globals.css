@@ -64,3 +64,49 @@
     font-family: var(--font-geist-sans), "Segoe UI", sans-serif;
   }
 }
+
+@layer base {
+  /*
+   * Input method, not screen size. A 1280px laptop can have a touchscreen and a
+   * 1024px tablet can have a trackpad, so these key off `pointer: coarse`
+   * rather than a width breakpoint — desktop stays compact while every finger
+   * target clears the 44px comfortable minimum.
+   */
+  @media (pointer: coarse) {
+    button,
+    [role="button"],
+    a[href],
+    summary {
+      min-height: 44px;
+    }
+
+    /* Icon-only controls need width too, not just height. */
+    button:has(> svg:only-child),
+    a[href]:has(> svg:only-child) {
+      min-width: 44px;
+    }
+
+    /* Inline text links inside a paragraph must not become 44px blocks. */
+    p a[href],
+    li a[href],
+    label a[href] {
+      min-height: 0;
+    }
+  }
+
+  /*
+   * Notched and rounded-corner phones. `viewport-fit=cover` in the layout's
+   * viewport export lets content reach the physical edges; these insets keep it
+   * out from under the notch and the home indicator. max() so the normal
+   * padding still applies on hardware with no insets.
+   */
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* The sticky header sits under the status bar on a notched device. */
+  header.sticky {
+    padding-top: env(safe-area-inset-top);
+  }
+}

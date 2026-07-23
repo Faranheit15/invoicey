@@ -473,7 +473,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
           </AlertBanner>
         ) : null}
 
-        <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
+        {/* Two columns from lg, not xl: at 1024–1279 (iPad landscape, small
+            laptops, split-screen windows) the preview used to sit ~1500px down,
+            so the user scrolled past the entire form to see the document they
+            were building. min-w-0 is load-bearing — grid items default to
+            min-width:auto, and without it the line-item grid's min-w-[680px]
+            propagates up and pushes the whole page into horizontal scroll. */}
+        <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr] xl:grid-cols-[1.2fr_1fr] [&>*]:min-w-0">
           <Card className="border-slate-200 shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <CardHeader className="pb-3">
               <CardTitle className="text-xl text-slate-900 dark:text-slate-100">
@@ -711,18 +717,31 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   </Button>
                 </div>
                 <div className="overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700">
-                  <div className="hidden md:block">
-                    <div className="grid min-w-[680px] grid-cols-[1.6fr_120px_150px_140px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  {/* Table vs. cards is decided by how wide the *form column*
+                      is, not by viewport size — and the column is not monotonic
+                      in the viewport. Single column below lg is roughly
+                      viewport-wide (657px at 768), so the table fits. From lg
+                      the editor splits in two and the form column drops to
+                      ~434px, so cards read better. From xl the split column is
+                      back up to ~641px and the table fits again. Hence the
+                      table appearing, disappearing, and reappearing. */}
+                  <div className="hidden md:block lg:hidden xl:block">
+                    {/* The form column is ~635px even at a 1440px viewport
+                        (max-w-7xl caps the container), so the old 680px grid
+                        scrolled sideways inside its own card at every desktop
+                        size. Retuned to 580px so it fits the column it lives
+                        in; the wrapper's scroll is now a genuine last resort. */}
+                    <div className="grid min-w-[556px] grid-cols-[minmax(0,1.6fr)_84px_120px_112px_40px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                       <div>Description</div>
                       <div>Qty</div>
                       <div>Unit Price</div>
                       <div>Amount</div>
                       <div></div>
                     </div>
-                    <div className="min-w-[680px] space-y-2 p-3">
+                    <div className="min-w-[556px] space-y-2 p-3">
                       {invoice.items.map((item, index) => (
                         <div
-                          className="grid grid-cols-[1.6fr_120px_150px_140px_44px] items-center gap-2"
+                          className="grid grid-cols-[minmax(0,1.6fr)_84px_120px_112px_40px] items-center gap-2"
                           key={`item-${index}`}
                         >
                           <Input
@@ -786,7 +805,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     </div>
                   </div>
 
-                  <div className="space-y-3 p-3 md:hidden">
+                  <div className="space-y-3 p-3 md:hidden lg:block xl:hidden">
                     {invoice.items.map((item, index) => (
                       <div
                         className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-800/80"
@@ -1068,7 +1087,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 shadow-sm dark:border-slate-700 dark:bg-slate-900 xl:sticky xl:top-24 xl:h-fit">
+          <Card className="border-slate-200 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:sticky lg:top-24 lg:h-fit">
             <CardHeader className="border-b border-slate-200 pb-3 dark:border-slate-700">
               <CardTitle className="text-xl text-slate-900 dark:text-slate-100">
                 Live Preview
