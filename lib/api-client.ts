@@ -30,6 +30,69 @@ export class UnauthenticatedError extends Error {
 }
 
 /**
+ * The request never produced a response: the device is offline, DNS failed, or
+ * the request exceeded REQUEST_TIMEOUT_MS. Distinct from ApiError, which means
+ * the server answered and said no. Callers should offer a retry rather than
+ * telling the user their input was wrong.
+ */
+export class NetworkError extends Error {
+  readonly kind: "offline" | "timeout" | "unreachable";
+  constructor(kind: "offline" | "timeout" | "unreachable") {
+    super(kind);
+    this.name = "NetworkError";
+    this.kind = kind;
+  }
+}
+
+/** Requests that outlive this are treated as a timeout, not a hang. */
+export const REQUEST_TIMEOUT_MS = 20_000;
+
+/**
+ * Default copy for a non-OK response whose body carried no `error` string.
+ * "Request failed." tells the user nothing they can act on; these do.
+ */
+const statusFallbackMessage = (status: number): string => {
+  if (status === 400 || status === 422) {
+    return "Some details were rejected. Check the highlighted fields and try again.";
+  }
+  if (status === 403) return "You don't have permission to do that.";
+  if (status === 404) return "That invoice no longer exists. It may have been deleted.";
+  if (status === 409) {
+    return "This invoice changed somewhere else. Reload to get the latest version.";
+  }
+  if (status === 429) return "Too many requests. Wait a moment and try again.";
+  if (status >= 500) return "Something broke on our side. Try again in a moment.";
+  return "Request failed.";
+};
+
+/**
+ * Turn any thrown value from an API call into copy a user can act on, plus
+ * whether retrying the same request could plausibly succeed. Components render
+ * this instead of hand-writing a per-call fallback string.
+ */
+export const describeRequestError = (
+  error: unknown,
+  fallback: string
+): { message: string; canRetry: boolean } => {
+  if (error instanceof NetworkError) {
+    if (error.kind === "offline") {
+      return {
+        message: "You appear to be offline. Your work is still here — reconnect and try again.",
+        canRetry: true,
+      };
+    }
+    if (error.kind === "timeout") {
+      return { message: "The server took too long to respond.", canRetry: true };
+    }
+    return { message: "Couldn't reach the server.", canRetry: true };
+  }
+  if (error instanceof ApiError) {
+    return { message: error.message, canRetry: error.status === 429 || error.status >= 500 };
+  }
+  return { message: fallback, canRetry: true };
+};
+
+/**
  * Resolve the current Firebase user AFTER session restoration has completed.
  *
  * Reading `auth.currentUser` synchronously (e.g. in an effect that runs on
@@ -72,7 +135,25 @@ export const authedFetch = async <T = unknown>(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(path, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers,
+      signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // fetch only rejects when no response was produced at all. Everything the
+    // server actually answered — including 500s — lands below as an ApiError.
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new NetworkError("timeout");
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      throw new NetworkError("offline");
+    }
+    throw new NetworkError("unreachable");
+  }
+
   const data = (await response.json().catch(() => null)) as unknown;
 
   if (!response.ok) {
@@ -82,7 +163,7 @@ export const authedFetch = async <T = unknown>(
       "error" in data &&
       typeof (data as { error?: unknown }).error === "string"
         ? (data as { error: string }).error
-        : "Request failed.";
+        : statusFallbackMessage(response.status);
     throw new ApiError(message, response.status);
   }
 

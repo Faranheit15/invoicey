@@ -17,8 +17,14 @@ mock.module("@/lib/auth-client", () => ({
   requiresEmailVerification: () => needsVerification,
 }));
 
-const { authedFetch, invoicesApi, ApiError, UnauthenticatedError } =
-  await import("@/lib/api-client");
+const {
+  authedFetch,
+  invoicesApi,
+  ApiError,
+  UnauthenticatedError,
+  NetworkError,
+  describeRequestError,
+} = await import("@/lib/api-client");
 
 const okUser = { getIdToken: async () => "id-token-123" };
 
@@ -85,5 +91,88 @@ describe("authedFetch", () => {
     const result = await authedFetch("/api/invoices");
     expect(result).toBeDefined();
     expect(ApiError).toBeDefined();
+  });
+});
+
+describe("network failures", () => {
+  // fetch only rejects when no response was produced. Those cases used to
+  // escape as a raw TypeError, so every `instanceof ApiError` check missed and
+  // the user got a generic message that blamed their input.
+  it("maps a rejected fetch to NetworkError, not ApiError", async () => {
+    globalThis.fetch = mock(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+
+    const error = await authedFetch("/api/invoices").catch((e) => e);
+    expect(error).toBeInstanceOf(NetworkError);
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+
+  it("maps an aborted request to NetworkError(timeout)", async () => {
+    globalThis.fetch = mock(async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    }) as unknown as typeof fetch;
+
+    const error = await authedFetch("/api/invoices").catch((e) => e);
+    expect(error).toBeInstanceOf(NetworkError);
+    expect((error as { kind: string }).kind).toBe("timeout");
+  });
+
+  it("attaches an abort signal so a request cannot hang forever", async () => {
+    await invoicesApi.list();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBeDefined();
+  });
+});
+
+describe("statusFallbackMessage (via ApiError)", () => {
+  const respondWith = (status: number, body: unknown = null) => {
+    globalThis.fetch = mock(
+      async () => new Response(body ? JSON.stringify(body) : "", { status })
+    ) as unknown as typeof fetch;
+  };
+
+  it("prefers the server's own error string over any fallback", async () => {
+    respondWith(400, { error: "Invoice number already exists" });
+    const error = await authedFetch("/api/invoices").catch((e) => e);
+    expect((error as Error).message).toBe("Invoice number already exists");
+  });
+
+  it("substitutes actionable copy when the body carries no error string", async () => {
+    respondWith(500);
+    const error = await authedFetch("/api/invoices").catch((e) => e);
+    expect((error as Error).message).toContain("our side");
+    expect((error as Error).message).not.toBe("Request failed.");
+  });
+
+  it("distinguishes 404 from a generic failure", async () => {
+    respondWith(404);
+    const error = await authedFetch("/api/invoices").catch((e) => e);
+    expect((error as Error).message).toContain("no longer exists");
+  });
+});
+
+describe("describeRequestError", () => {
+  it("offers a retry for offline, and says the work is still there", () => {
+    const result = describeRequestError(new NetworkError("offline"), "fallback");
+    expect(result.canRetry).toBe(true);
+    expect(result.message).toContain("offline");
+  });
+
+  it("offers a retry for 5xx but not for a validation rejection", () => {
+    expect(describeRequestError(new ApiError("boom", 500), "f").canRetry).toBe(true);
+    expect(describeRequestError(new ApiError("bad field", 400), "f").canRetry).toBe(
+      false
+    );
+  });
+
+  it("passes the server message straight through for an ApiError", () => {
+    const result = describeRequestError(new ApiError("Invoice not found", 404), "f");
+    expect(result.message).toBe("Invoice not found");
+  });
+
+  it("falls back to the caller's copy for an unrecognized throw", () => {
+    const result = describeRequestError(new Error("???"), "Couldn't save this invoice.");
+    expect(result.message).toBe("Couldn't save this invoice.");
   });
 });

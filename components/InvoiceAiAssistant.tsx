@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { AlertBanner, LiveStatus } from "@/components/ui/alert-banner";
 import type {
   AssistantConversationEntry,
   InvoiceAssistantPatch,
@@ -42,6 +43,9 @@ export default function InvoiceAiAssistant({
   const [conversation, setConversation] = useState<AssistantConversationEntry[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [assistantError, setAssistantError] = useState("");
+  // Kept so a failed request can be retried verbatim; the input is cleared on
+  // submit, so without this the user would have to retype their description.
+  const [lastPrompt, setLastPrompt] = useState("");
   const [clarifyingQuestions, setClarifyingQuestions] = useState<string[]>([]);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [appliedFields, setAppliedFields] = useState<string[]>([]);
@@ -55,6 +59,7 @@ export default function InvoiceAiAssistant({
     }
 
     setAssistantError("");
+    setLastPrompt(message);
     const userMessage: AssistantConversationEntry = {
       role: "user",
       content: message,
@@ -87,9 +92,11 @@ export default function InvoiceAiAssistant({
           conversation: updatedConversation,
           draft: invoice,
         }),
+        // The model call is slower than a normal request but must not hang.
+        signal: AbortSignal.timeout(60_000),
       });
 
-      const data = (await response.json()) as
+      const data = (await response.json().catch(() => ({}))) as
         | InvoiceAssistantResponse
         | { error?: string; details?: string };
 
@@ -115,8 +122,18 @@ export default function InvoiceAiAssistant({
       };
 
       setConversation((prev) => [...prev, assistantMessage].slice(-MAX_CONVERSATION_ENTRIES));
-    } catch {
-      setAssistantError("Unable to process your invoice request right now.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        setAssistantError(
+          "The assistant took too long to answer. Your description is kept below — try again, or fill the form yourself."
+        );
+      } else if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        setAssistantError(
+          "You appear to be offline. The assistant needs a connection; the form below still works."
+        );
+      } else {
+        setAssistantError("The assistant couldn't answer that one. Try rephrasing it.");
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -195,10 +212,18 @@ export default function InvoiceAiAssistant({
           ))}
         </div>
 
+        <LiveStatus>
+          {isGenerating
+            ? "Reading your description…"
+            : appliedFields.length
+              ? `Filled ${appliedFields.length} field${appliedFields.length > 1 ? "s" : ""}.`
+              : ""}
+        </LiveStatus>
+
         {assistantError ? (
-          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+          <AlertBanner onRetry={lastPrompt ? () => submitPrompt(lastPrompt) : undefined}>
             {assistantError}
-          </div>
+          </AlertBanner>
         ) : null}
 
         {conversation.length ? (

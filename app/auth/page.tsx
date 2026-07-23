@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { AlertBanner } from "@/components/ui/alert-banner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GridBackground } from "@/components/ui/aceternity/grid-background";
 import { Spotlight } from "@/components/ui/aceternity/spotlight";
@@ -175,17 +176,26 @@ export default function AuthPage() {
     const providerIds = getProviderIdsFromFirebaseUser(user);
     const idToken = await user.getIdToken();
 
-    const response = await fetch("/api/auth/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        idToken,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idToken,
+        }),
+      });
+    } catch {
+      // Firebase already authenticated the user at this point; only our own
+      // session call failed. Say that, instead of surfacing "Failed to fetch".
+      throw new Error(
+        "Signed in, but we couldn't reach the server to start your session. Check your connection and try again."
+      );
+    }
 
-    const data = (await response.json()) as SessionResponse;
+    const data = (await response.json().catch(() => ({}))) as SessionResponse;
     if (!response.ok || !data.sessionToken) {
-      throw new Error(data.error || "Unable to start session.");
+      throw new Error(data.error || "Unable to start your session. Try again.");
     }
 
     const userSessionManager = new UserSessionManager();
@@ -452,20 +462,24 @@ export default function AuthPage() {
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
-            {authError ? (
-              <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/15 dark:text-rose-200">
-                {authError}
-              </div>
-            ) : null}
+            {authError ? <AlertBanner>{authError}</AlertBanner> : null}
 
             {authNotice ? (
-              <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700 dark:border-sky-400/40 dark:bg-sky-500/15 dark:text-sky-200">
+              <div
+                role="status"
+                aria-live="polite"
+                className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700 dark:border-sky-400/40 dark:bg-sky-500/15 dark:text-sky-200"
+              >
                 {authNotice}
               </div>
             ) : null}
 
             {verificationEmail ? (
-              <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/15 dark:text-amber-100">
+              <div
+                role="status"
+                aria-live="polite"
+                className="space-y-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/15 dark:text-amber-100"
+              >
                 <p>
                   {verificationSource === "signup"
                     ? `We sent a verification link to ${verificationEmail}. Verify your email before signing in.`
@@ -540,6 +554,7 @@ export default function AuthPage() {
                       </label>
                       <Input
                         id="login-email"
+                        aria-required="true"
                         type="email"
                         placeholder="you@company.com"
                         autoComplete="email"
@@ -567,6 +582,7 @@ export default function AuthPage() {
                       </div>
                       <Input
                         id="login-password"
+                        aria-required="true"
                         type="password"
                         placeholder="Enter password"
                         autoComplete="current-password"
@@ -604,6 +620,7 @@ export default function AuthPage() {
                       </label>
                       <Input
                         id="signup-email"
+                        aria-required="true"
                         type="email"
                         placeholder="you@company.com"
                         autoComplete="email"
@@ -621,6 +638,7 @@ export default function AuthPage() {
                       </label>
                       <Input
                         id="signup-password"
+                        aria-required="true"
                         type="password"
                         placeholder="At least 8 chars, upper/lowercase, number"
                         autoComplete="new-password"
@@ -638,6 +656,7 @@ export default function AuthPage() {
                       </label>
                       <Input
                         id="signup-confirm-password"
+                        aria-required="true"
                         type="password"
                         placeholder="Repeat your password"
                         autoComplete="new-password"

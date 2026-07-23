@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Modal, ModalCloseButton } from "@/components/ui/modal";
+import { AlertBanner } from "@/components/ui/alert-banner";
 import {
   createInvoiceCsv,
   createInvoiceHtml,
@@ -13,7 +15,6 @@ import {
   getInvoiceStatus,
 } from "@/lib/invoices";
 import {
-  Cross1Icon,
   DownloadIcon,
   FileIcon,
   Pencil1Icon,
@@ -28,6 +29,8 @@ interface InvoiceModalProps {
   isMutating?: boolean;
 }
 
+// Rendered on the invoice sheet's near-black masthead in both themes, so these
+// stay light-on-dark rather than inverting with the page.
 const statusClassName = {
   draft: "bg-slate-100 text-slate-700",
   sent: "bg-blue-100 text-blue-700",
@@ -56,6 +59,8 @@ export default function InvoiceModal({
   isMutating = false,
 }: InvoiceModalProps) {
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const titleId = useId();
   const currency = invoice.currency || "INR";
   const status = getInvoiceStatus(invoice);
   const subtotal =
@@ -73,12 +78,18 @@ export default function InvoiceModal({
   }, [invoice.companyLogo]);
 
   const exportPdf = () => {
+    setExportError("");
     const html = createInvoiceHtml(invoice, { autoPrint: true });
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const printableWindow = window.open(url, "_blank", "noopener,noreferrer");
     if (!printableWindow) {
+      // Popup blockers are the single most common failure of this flow, and it
+      // used to fail silently — the user clicked and nothing at all happened.
       URL.revokeObjectURL(url);
+      setExportError(
+        "Your browser blocked the print window. Allow pop-ups for this site, or download the HTML copy and print that."
+      );
       return;
     }
 
@@ -114,14 +125,17 @@ export default function InvoiceModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-3 backdrop-blur-[2px] sm:p-6">
-      <div className="relative max-h-[95vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+    <Modal open onClose={onClose} labelledBy={titleId} className="max-w-6xl">
+      <div className="flex flex-col max-h-[95vh]">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-700 dark:bg-slate-900">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs tracking-wider uppercase text-slate-500 dark:text-slate-400">
               Invoice
             </p>
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            <h2
+              id={titleId}
+              className="truncate text-xl font-semibold text-slate-900 dark:text-slate-100"
+            >
               {invoice.invoiceNumber}
             </h2>
           </div>
@@ -172,13 +186,17 @@ export default function InvoiceModal({
             <Button size="sm" variant="outline" onClick={exportJson}>
               JSON
             </Button>
-            <Button size="icon" variant="ghost" onClick={onClose} aria-label="Close">
-              <Cross1Icon className="w-4 h-4" />
-            </Button>
+            <ModalCloseButton onClose={onClose} />
           </div>
         </div>
 
-        <div className="max-h-[calc(95vh-80px)] overflow-auto p-4 sm:p-6">
+        {exportError ? (
+          <div className="border-b border-slate-200 px-5 py-3 dark:border-slate-700">
+            <AlertBanner>{exportError}</AlertBanner>
+          </div>
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
           <article className="mx-auto max-w-4xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-950">
             <header className="flex flex-wrap justify-between gap-5 border-b border-slate-200 bg-slate-900 px-6 py-6 text-slate-100 sm:px-8 dark:border-slate-700">
               <div>
@@ -359,6 +377,6 @@ export default function InvoiceModal({
           </article>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

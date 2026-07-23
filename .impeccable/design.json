@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-23T00:00:00.000Z",
+  "title": "Design System: Invoicey",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "hsl(210 33% 98%)",
+        "tonalRamp": ["#020617", "#0F172A", "#1E293B", "#334155", "#64748B", "#CBD5E1", "#F1F5F9", "#F8FAFC"]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "hsl(222 47% 11%)",
+        "tonalRamp": ["#020617", "#0F172A", "#1E293B", "#334155", "#64748B", "#CBD5E1", "#F1F5F9", "#F8FAFC"]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Near-Black Slate",
+        "canonical": "hsl(222 47% 11%)",
+        "tonalRamp": ["#020617", "#0F172A", "#1E293B", "#334155", "#64748B", "#CBD5E1", "#F1F5F9", "#F8FAFC"]
+      },
+      "muted-foreground": {
+        "role": "neutral",
+        "displayName": "Quiet Ink",
+        "canonical": "hsl(215 16% 46%)",
+        "tonalRamp": ["#020617", "#0F172A", "#1E293B", "#334155", "#64748B", "#94A3B8", "#E2E8F0", "#F8FAFC"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "hsl(214 32% 88%)",
+        "tonalRamp": ["#020617", "#0F172A", "#1E293B", "#334155", "#94A3B8", "#CBD5E1", "#E2E8F0", "#F8FAFC"]
+      },
+      "ring": {
+        "role": "primary",
+        "displayName": "Focus Blue",
+        "canonical": "hsl(217 91% 60%)",
+        "tonalRamp": ["#172554", "#1E3A8A", "#1D4ED8", "#3B82F6", "#60A5FA", "#93C5FD", "#DBEAFE", "#EFF6FF"]
+      },
+      "atmosphere-sky": {
+        "role": "secondary",
+        "displayName": "Signal Sky",
+        "canonical": "#0EA5E9",
+        "tonalRamp": ["#082F49", "#0C4A6E", "#0369A1", "#0EA5E9", "#38BDF8", "#7DD3FC", "#E0F2FE", "#F0F9FF"]
+      },
+      "atmosphere-orange": {
+        "role": "secondary",
+        "displayName": "Signal Orange",
+        "canonical": "#F97316",
+        "tonalRamp": ["#431407", "#7C2D12", "#C2410C", "#F97316", "#FB923C", "#FDBA74", "#FFEDD5", "#FFF7ED"]
+      },
+      "status-paid": {
+        "role": "tertiary",
+        "displayName": "Paid Emerald",
+        "canonical": "#047857",
+        "tonalRamp": ["#022C22", "#064E3B", "#047857", "#10B981", "#34D399", "#6EE7B7", "#D1FAE5", "#ECFDF5"]
+      },
+      "status-sent": {
+        "role": "tertiary",
+        "displayName": "Sent Blue",
+        "canonical": "#1D4ED8",
+        "tonalRamp": ["#172554", "#1E3A8A", "#1D4ED8", "#3B82F6", "#60A5FA", "#93C5FD", "#DBEAFE", "#EFF6FF"]
+      },
+      "status-overdue": {
+        "role": "tertiary",
+        "displayName": "Overdue Rose",
+        "canonical": "#BE123C",
+        "tonalRamp": ["#4C0519", "#881337", "#BE123C", "#F43F5E", "#FB7185", "#FDA4AF", "#FFE4E6", "#FFF1F2"]
+      },
+      "destructive": {
+        "role": "tertiary",
+        "displayName": "Destructive Red",
+        "canonical": "hsl(0 72% 51%)",
+        "tonalRamp": ["#450A0A", "#7F1D1D", "#B91C1C", "#DC2626", "#EF4444", "#FCA5A5", "#FEE2E2", "#FEF2F2"]
+      },
+      "document-ink": {
+        "role": "neutral",
+        "displayName": "Document Ink",
+        "canonical": "#111827",
+        "tonalRamp": ["#030712", "#111827", "#1F2937", "#374151", "#6B7280", "#D1D5DB", "#F3F4F6", "#F9FAFB"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Landing hero only. Paired with text-balance and a max-w-2xl subhead."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page titles. Marketing pages run one step larger than the dashboard."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card titles. The Card primitive's 1.5rem default is overridden downward nearly everywhere; 1.25rem is the real value."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "App copy, table cells, form help. Marketing copy steps up to 1rem-1.125rem."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase wide-tracked micro-label. The system's signature typographic device, present in all three registers."
+      }
+    },
+    "shadows": [
+      {
+        "name": "resting",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "purpose": "App cards. Barely visible; essentially a hairline reinforcement. The only shadow allowed on task surfaces."
+      },
+      {
+        "name": "sheet",
+        "value": "0 20px 60px rgba(15, 23, 42, 0.1)",
+        "purpose": "The exported invoice document. Reads as paper lifted off a desk. Stripped entirely in @media print."
+      },
+      {
+        "name": "sheet-deep",
+        "value": "0 28px 70px rgba(2, 6, 23, 0.1)",
+        "purpose": "Marketing hero cards, e.g. the pricing card. Runs 0.5 alpha in dark mode."
+      },
+      {
+        "name": "glow",
+        "value": "0 20px 60px rgba(14, 165, 233, 0.12)",
+        "purpose": "Bento card hover only. The single tinted shadow in the system."
+      }
+    ],
+    "motion": [
+      {
+        "name": "theme-transition",
+        "value": "background-color 200ms, color 200ms",
+        "purpose": "Applied to body so light/dark toggling crossfades rather than snapping."
+      },
+      {
+        "name": "control-transition",
+        "value": "color 150ms, background-color 150ms",
+        "purpose": "Buttons and links. transition-colors only: no lift, scale, or shadow change on hover."
+      },
+      {
+        "name": "surface-transition",
+        "value": "all 300ms",
+        "purpose": "Bento cards on marketing surfaces, where border, background, and shadow all move together on hover."
+      }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The default action everywhere. Near-black on light, inverting to near-white on dark.",
+      "html": "<button class=\"ds-btn-primary\">Create Invoice</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 8px 16px; border: none; border-radius: 10px; background: hsl(var(--primary, 222 47% 11%)); color: hsl(var(--primary-foreground, 210 40% 98%)); font-family: 'Segoe UI', sans-serif; font-size: 0.875rem; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-btn-primary:hover { background: hsl(var(--primary, 222 47% 11%) / 0.9); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background, 210 33% 98%)), 0 0 0 4px hsl(var(--ring, 217 91% 60%)); } .ds-btn-primary:disabled { opacity: 0.5; pointer-events: none; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary actions, the theme toggle, and inline table controls.",
+      "html": "<button class=\"ds-btn-outline\">Export</button>",
+      "css": ".ds-btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 8px 16px; border: 1px solid hsl(var(--input, 214 32% 88%)); border-radius: 10px; background: hsl(var(--background, 210 33% 98%)); color: hsl(var(--foreground, 222 47% 11%)); font-family: 'Segoe UI', sans-serif; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-btn-outline:hover { background: hsl(var(--accent, 210 40% 94%)); color: hsl(var(--accent-foreground, 222 47% 11%)); } .ds-btn-outline:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background, 210 33% 98%)), 0 0 0 4px hsl(var(--ring, 217 91% 60%)); }"
+    },
+    {
+      "name": "Destructive Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "The dashboard's delete control. Note it does NOT use the shadcn destructive variant; rose-tinted outline is the established pattern.",
+      "html": "<button class=\"ds-btn-destructive\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 15 15\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M5.5 1a.5.5 0 000 1h4a.5.5 0 000-1h-4zM3 3.5a.5.5 0 01.5-.5h8a.5.5 0 010 1H11v8a1.5 1.5 0 01-1.5 1.5h-4A1.5.5 0 014 12V4h-.5a.5.5 0 01-.5-.5zM5 4v8a.5.5 0 00.5.5h4A.5.5 0 0010 12V4H5z\" fill=\"currentColor\" fill-rule=\"evenodd\" clip-rule=\"evenodd\"/></svg>Delete</button>",
+      "css": ".ds-btn-destructive { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 8px 12px; border: 1px solid #FECDD3; border-radius: 10px; background: transparent; color: #E11D48; font-family: 'Segoe UI', sans-serif; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: background-color 150ms, color 150ms; } .ds-btn-destructive:hover { background: #FFF1F2; color: #BE123C; } .ds-btn-destructive:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background, 210 33% 98%)), 0 0 0 4px hsl(var(--ring, 217 91% 60%)); }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "40px control with a 1px stroke. Font size steps 1rem to 0.875rem at md to defeat iOS zoom-on-focus.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Client name\" />",
+      "css": ".ds-input { display: flex; width: 100%; height: 40px; padding: 8px 12px; border: 1px solid hsl(var(--input, 214 32% 88%)); border-radius: 10px; background: hsl(var(--background, 210 33% 98%)); color: hsl(var(--foreground, 222 47% 11%)); font-family: 'Segoe UI', sans-serif; font-size: 1rem; } .ds-input::placeholder { color: hsl(var(--muted-foreground, 215 16% 46%)); } .ds-input:focus-visible { outline: none; box-shadow: 0 0 0 2px hsl(var(--background, 210 33% 98%)), 0 0 0 4px hsl(var(--ring, 217 91% 60%)); } .ds-input:disabled { opacity: 0.5; cursor: not-allowed; } @media (min-width: 768px) { .ds-input { font-size: 0.875rem; } }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The app's container primitive. Opaque, 12px radius, hairline border, barely-there resting shadow.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-header\"><p class=\"ds-card-label\">Total Outstanding</p></div><div class=\"ds-card-body\"><p class=\"ds-card-amount\">₹1,24,500.00</p></div></div>",
+      "css": ".ds-card { border: 1px solid hsl(var(--border, 214 32% 88%)); border-radius: 12px; background: hsl(var(--card, 0 0% 100%)); color: hsl(var(--card-foreground, 222 47% 11%)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); font-family: 'Segoe UI', sans-serif; overflow: hidden; } .ds-card-header { padding: 24px 24px 8px; } .ds-card-label { margin: 0; font-size: 0.875rem; color: hsl(var(--muted-foreground, 215 16% 46%)); } .ds-card-body { padding: 0 24px 24px; } .ds-card-amount { margin: 0; font-size: 1.875rem; font-weight: 600; }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "The most reused semantic component. Four tinted pairs; draft is deliberately colorless because a draft is an absence of state.",
+      "html": "<span class=\"ds-pill ds-pill-draft\">draft</span> <span class=\"ds-pill ds-pill-sent\">sent</span> <span class=\"ds-pill ds-pill-paid\">paid</span> <span class=\"ds-pill ds-pill-overdue\">overdue</span>",
+      "css": ".ds-pill { display: inline-flex; padding: 4px 8px; border-radius: 9999px; font-family: 'Segoe UI', sans-serif; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.025em; } .ds-pill-draft { background: #F1F5F9; color: #334155; } .ds-pill-sent { background: #DBEAFE; color: #1D4ED8; } .ds-pill-paid { background: #D1FAE5; color: #047857; } .ds-pill-overdue { background: #FFE4E6; color: #BE123C; }"
+    },
+    {
+      "name": "Header Navigation",
+      "kind": "nav",
+      "refersTo": "nav",
+      "description": "64px sticky header. The only element in the app that is both sticky and translucent.",
+      "html": "<header class=\"ds-nav\"><a class=\"ds-nav-brand\" href=\"#\"><span class=\"ds-nav-mark\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 15 15\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M9.5 1a.5.5 0 00-.4.2L6.6 4.5H3.5a.5.5 0 00-.35.15l-2 2a.5.5 0 00.15.82l2.6 1.04 2.6 2.6 1.04 2.6a.5.5 0 00.82.15l2-2A.5.5 0 0010.5 11.5V8.4l3.3-2.5a.5.5 0 00.2-.4V1.5a.5.5 0 00-.5-.5H9.5z\" fill=\"currentColor\"/></svg></span><span class=\"ds-nav-lockup\"><span class=\"ds-nav-name\">Invoicey</span><span class=\"ds-nav-tag\">Billing OS</span></span></a><nav class=\"ds-nav-links\"><a href=\"#\">About</a><a href=\"#\">Pricing</a><a href=\"#\">Contact</a></nav></header>",
+      "css": ".ds-nav { position: sticky; top: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 64px; padding: 0 16px; border-bottom: 1px solid #E2E8F0; background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); font-family: 'Segoe UI', sans-serif; } .ds-nav-brand { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; } .ds-nav-mark { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 12px; background: #0F172A; color: #FFFFFF; } .ds-nav-lockup { display: flex; flex-direction: column; } .ds-nav-name { font-size: 1rem; font-weight: 600; color: #0F172A; } .ds-nav-tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748B; } .ds-nav-links { display: flex; align-items: center; gap: 20px; font-size: 0.875rem; } .ds-nav-links a { color: #475569; text-decoration: none; transition: color 150ms; } .ds-nav-links a:hover { color: #0F172A; }"
+    },
+    {
+      "name": "Bento Card",
+      "kind": "card",
+      "refersTo": "bento-card",
+      "description": "Marketing-only feature card. Translucent, 16px corners, and the system's single tinted hover shadow. Do not carry this into app surfaces.",
+      "html": "<article class=\"ds-bento\"><span class=\"ds-bento-icon\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 15 15\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M7.5 1a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM6.8 9.9L4.3 7.4l.7-.7 1.8 1.8 3.5-3.5.7.7-4.2 4.2z\" fill=\"currentColor\"/></svg></span><p class=\"ds-bento-eyebrow\">Builder</p><h3 class=\"ds-bento-title\">Invoice Studio</h3><p class=\"ds-bento-body\">Create polished invoices with line items, discount, tax, and payment notes.</p></article>",
+      "css": ".ds-bento { position: relative; display: block; overflow: hidden; padding: 20px; border: 1px solid #E2E8F0; border-radius: 16px; background: rgba(255,255,255,0.8); backdrop-filter: blur(4px); font-family: 'Segoe UI', sans-serif; transition: all 300ms; } .ds-bento:hover { border-color: rgba(125,211,252,0.4); background: #FFFFFF; box-shadow: 0 20px 60px rgba(14,165,233,0.12); } .ds-bento-icon { display: inline-flex; padding: 8px; border: 1px solid #E2E8F0; border-radius: 12px; background: #F1F5F9; color: #0369A1; } .ds-bento-eyebrow { margin: 12px 0 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.18em; color: #64748B; } .ds-bento-title { margin: 8px 0 0; font-size: 1.125rem; font-weight: 600; color: #0F172A; } .ds-bento-body { margin: 8px 0 0; font-size: 0.875rem; line-height: 1.625; color: #475569; }"
+    },
+    {
+      "name": "Invoice Document Masthead",
+      "kind": "custom",
+      "refersTo": "document-sheet",
+      "description": "The product's signature artifact. Defined as a raw HTML string in lib/invoice-export.ts with its own CSS, sharing no tokens with the app. The 2px near-black rule is the heaviest line in the system.",
+      "html": "<div class=\"ds-sheet\"><div class=\"ds-sheet-header\"><div class=\"ds-sheet-brand\"><h1>Acme Studio</h1><p>hello@acme.studio<br />Bengaluru, KA 560001</p></div><div class=\"ds-sheet-meta\"><p class=\"ds-sheet-label\">Invoice No.</p><p class=\"ds-sheet-value\">INV-2026-014</p><p class=\"ds-sheet-label\">Invoice Date</p><p class=\"ds-sheet-value\">23 Jul 2026</p><span class=\"ds-sheet-status\">PAID</span></div></div><div class=\"ds-sheet-totals\"><table><tr><td>Subtotal</td><td class=\"ds-amount\">₹1,05,000.00</td></tr><tr><td>CGST</td><td class=\"ds-amount\">₹9,450.00</td></tr><tr><td>SGST</td><td class=\"ds-amount\">₹9,450.00</td></tr><tr class=\"ds-grand\"><td>Total</td><td class=\"ds-amount\">₹1,23,900.00</td></tr></table></div></div>",
+      "css": ".ds-sheet { max-width: 880px; margin: 0 auto; background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 60px rgba(15,23,42,0.1); font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; color: #111827; } .ds-sheet-header { display: flex; justify-content: space-between; gap: 24px; padding: 28px; border-bottom: 2px solid #0F172A; } .ds-sheet-brand h1 { margin: 0; font-size: 28px; letter-spacing: 0.04em; } .ds-sheet-brand p { margin: 8px 0 0; color: #4B5563; line-height: 1.5; } .ds-sheet-meta { min-width: 260px; } .ds-sheet-label { margin: 0; color: #6B7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; } .ds-sheet-value { color: #111827; font-size: 14px; font-weight: 600; margin: 3px 0 12px; } .ds-sheet-status { display: inline-block; padding: 6px 10px; background: #0F172A; color: #FFFFFF; border-radius: 999px; font-size: 12px; letter-spacing: 0.06em; } .ds-sheet-totals { display: flex; justify-content: flex-end; padding: 24px 28px; } .ds-sheet-totals table { width: 320px; border-collapse: collapse; font-size: 13px; } .ds-sheet-totals td { padding: 7px 0; } .ds-sheet-totals .ds-amount { text-align: right; font-weight: 600; } .ds-sheet-totals .ds-grand td { border-top: 1px solid #D1D5DB; padding-top: 10px; font-size: 15px; font-weight: 700; }"
+    }
+  ],
+  "narrative": {
+    "overview": "Invoicey has no unifying design thesis, and this file does not invent one. It is a record of what the implementation actually does, written so that future work can unify the system deliberately rather than by accident.\n\nThe system is slate-neutral and near-monochrome. Structure comes from 1px borders and small steps in background lightness, not from color. A full shadcn HSL token layer is defined in globals.css and wired through tailwind.config.js, but most page code bypasses it and writes literal slate-* utilities with hand-authored dark: twins. The tokens and the literals happen to agree today, which is why the drift is invisible on screen and expensive in code.\n\nThree registers exist, built independently rather than derived from one another: atmospheric marketing surfaces with blurred sky and orange glows over a masked 44px grid; flat, quiet app surfaces with opaque cards and hairline borders; and the exported invoice document, whose self-contained ink-on-paper CSS shares no tokens with the app. Unification is the stated direction. Nothing in the accent strategy or the marketing atmosphere is hardened; the neutral base, the token layer's structure, and the document's ink discipline are.",
+    "keyCharacteristics": [
+      "Near-monochrome slate; color carries state, not identity",
+      "Borders and tonal steps over shadows, in-app",
+      "Every dark variant hand-written; no automatic theming",
+      "Uppercase, wide-tracked micro-labels as the recurring accent of the type system",
+      "Rounded but not soft: 8-16px corners, full pills only for status",
+      "No webfont; the system font stack is the type system",
+      "Two surface registers, acknowledged as unreconciled"
+    ],
+    "rules": [
+      {
+        "name": "The Color-Is-State Rule",
+        "body": "Saturated color earns its place by reporting status, error, or destructiveness. It is never decoration on a control. Every interactive element in the app is slate or near-black; adding a colored primary button would break the only color convention the system currently keeps.",
+        "section": "colors"
+      },
+      {
+        "name": "The Atmosphere-Not-Object Rule",
+        "body": "Sky and orange exist as light, not as material - blurred radial gradients at 35-60% opacity behind content, never as a fill, border, or text color on an object. Any future promotion of sky into a real accent must be a deliberate system decision applied everywhere, not a one-off button.",
+        "section": "colors"
+      },
+      {
+        "name": "The Hand-Written Dark Rule",
+        "body": "There is no automatic dark derivation. Every color in page code ships with an explicit dark: twin. A new surface without dark variants is broken, not merely unstyled.",
+        "section": "colors"
+      },
+      {
+        "name": "The Uppercase-Label Rule",
+        "body": "Small text earns legibility from letterspacing, not weight or color. Any label below 0.75rem is uppercase with tracking of at least 0.05em and set in muted-foreground. This is the most consistent single behavior across all three registers.",
+        "section": "typography"
+      },
+      {
+        "name": "The Numbers-Are-Semibold Rule",
+        "body": "Every money figure - dashboard stat, table amount, preview total, document grand total - is weight 600 or 700 against 400 body text. Amounts are never the same weight as the label describing them.",
+        "section": "typography"
+      },
+      {
+        "name": "The Preview-Stays-Visible Rule",
+        "body": "On xl and wider the invoice preview is sticky at top-24, clearing the 64px sticky header plus breathing room. The user must never have to scroll away from the document to edit it.",
+        "section": "layout"
+      },
+      {
+        "name": "The Scroll-Don't-Squeeze Rule",
+        "body": "Tabular numeric data gets a horizontal scroll container with a minimum width rather than shrinking columns or reflowing into cards. Money columns keep their pixel widths at every viewport.",
+        "section": "layout"
+      },
+      {
+        "name": "The Print-Strips-Depth Rule",
+        "body": "Every visual affordance that exists to suggest paper - shadow, radius, page background, body padding - is removed in @media print. The document's screen presentation and its printed presentation are deliberately different, and the printed one wins on correctness.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Flat-App Rule",
+        "body": "Task surfaces separate with borders and background steps. Reaching for a shadow inside the dashboard or editor is a signal that the border hierarchy is wrong, not that a shadow is needed.",
+        "section": "elevation"
+      },
+      {
+        "name": "The One-Hairline Rule",
+        "body": "Structural borders are 1px in the border token. Weight is not a hierarchy device in-app; the single 2px rule in the exported document is the only sanctioned exception, and it earns that by marking the document's masthead.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Pills-Report-State Rule",
+        "body": "Fully-rounded shapes are reserved for status, identity, and metadata. Actions use the 10px control radius. A pill-shaped button would misread as a badge.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do write both light and dark variants for every color you introduce. There is no automatic derivation - a missing dark: twin is a bug that only shows up for half the users.",
+      "Do separate surfaces with a 1px border hairline and a one-step background change before considering a shadow. This is how every app surface currently works.",
+      "Do set micro-labels uppercase, weight 600, at 0.05em-0.18em tracking in muted-foreground. It is the most consistent typographic behavior in the system and the closest thing Invoicey has to a signature.",
+      "Do set every money figure at weight 600 or 700, heavier than the label beside it.",
+      "Do give tabular numeric data a min-w scroll container rather than reflowing or shrinking columns.",
+      "Do keep new invoice fields in sync across both renderings - the JSX live preview and the raw-string export template - and route their totals through buildTotalsRows.",
+      "Do wrap every interpolation in the export template in escapeHtml, toLineBreaks, or toSafeImageUrl. The template is a raw string with no framework escaping.",
+      "Do reach for hsl(var(--token)) utilities (bg-card, text-muted-foreground, border-border) in new code rather than literal slate-*. The token layer already exists and matches; using it is how the two registers eventually converge.",
+      "Do use the full-pill radius only for status, identity, and metadata."
+    ],
+    "donts": [
+      "Don't put sky or orange on a button, link, border, or text. Today they exist only as blurred atmosphere, and that is the only convention holding the accent story together. Promoting sky to a real accent is a legitimate future decision - but it must be made system-wide and recorded here, not introduced one component at a time.",
+      "Don't add shadows to dashboard or editor surfaces. If a card is not reading as separate, the border hierarchy is wrong.",
+      "Don't introduce a fourth radius value. The scale is --radius-derived (8/10/12) plus the 16px bento corner and the document's 14px sheet; both existing exceptions are already one too many.",
+      "Don't use border weight as a hierarchy device. Structural borders are 1px. The exported document's 2px masthead rule is the single sanctioned exception.",
+      "Don't style a new surface with hardcoded slate-* literals plus hand-written dark twins just because the existing pages do. That pattern is the drift this system needs to stop accumulating.",
+      "Don't treat the marketing atmosphere as global. Spotlights, the grid, backdrop-blur translucency, and 16px corners belong to marketing surfaces; carrying them into the editor would put decoration between the user and the document they are producing.",
+      "Don't add a webfont to a single surface. The missing --font-geist-sans is a project-level defect; fix it once in app/layout.tsx for the whole app, or leave the system stack alone.",
+      "Don't rely on the shadcn destructive button variant matching the app's destructive treatment. The dashboard's delete control is a rose-tinted outline button, and that is the established pattern."
+    ]
+  }
+}

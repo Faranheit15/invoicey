@@ -14,6 +14,9 @@ interface DatePickerFieldProps {
   className?: string;
   disabled?: boolean;
   placeholder?: string;
+  id?: string;
+  "aria-labelledby"?: string;
+  "aria-describedby"?: string;
 }
 
 const parseDateValue = (value: string): Date | undefined => {
@@ -47,6 +50,9 @@ export function DatePickerField({
   className,
   disabled = false,
   placeholder = "Select date",
+  id,
+  "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
 }: DatePickerFieldProps) {
   const [open, setOpen] = React.useState(false);
   const selectedDate = React.useMemo(() => parseDateValue(value), [value]);
@@ -58,6 +64,9 @@ export function DatePickerField({
           type="button"
           variant="outline"
           disabled={disabled}
+          id={id}
+          aria-labelledby={ariaLabelledBy}
+          aria-describedby={ariaDescribedBy}
           className={cn(
             "h-10 w-full justify-start text-left font-normal",
             !selectedDate && "text-muted-foreground",

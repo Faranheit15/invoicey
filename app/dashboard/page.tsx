@@ -12,9 +12,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AlertBanner } from "@/components/ui/alert-banner";
+import { ConfirmDialog } from "@/components/ui/modal";
 import {
   invoicesApi,
-  ApiError,
+  describeRequestError,
   UnauthenticatedError,
 } from "@/lib/api-client";
 import {
@@ -51,6 +53,9 @@ export default function DashboardPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [canRetryLoad, setCanRetryLoad] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<InvoiceRecord | null>(null);
   const [activeActionInvoiceId, setActiveActionInvoiceId] = useState<string | null>(
     null
   );
@@ -64,24 +69,26 @@ export default function DashboardPage() {
     try {
       setIsLoading(true);
       setLoadError("");
+      setCanRetryLoad(false);
 
       const data = await invoicesApi.list();
       setInvoices(data || []);
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
         if (error.reason === "verify-email") {
-          setLoadError(
-            "Please verify your email before accessing your dashboard."
-          );
+          setLoadError("Verify your email to reach your dashboard.");
           router.replace(`${DASHBOARD_AUTH_PATH}&reason=verify-email`);
         } else {
           router.replace(DASHBOARD_AUTH_PATH);
         }
         return;
       }
-      setLoadError(
-        error instanceof ApiError ? error.message : "Failed to fetch invoices."
+      const { message, canRetry } = describeRequestError(
+        error,
+        "Couldn't load your invoices."
       );
+      setLoadError(message);
+      setCanRetryLoad(canRetry);
       setInvoices([]);
     } finally {
       setIsLoading(false);
@@ -97,22 +104,26 @@ export default function DashboardPage() {
       try {
         setActiveActionInvoiceId(invoiceId);
         setLoadError("");
+        setCanRetryLoad(false);
+        setNotice("");
 
         await invoicesApi.patch(invoiceId, payload);
         return true;
       } catch (error) {
         if (error instanceof UnauthenticatedError) {
           if (error.reason === "verify-email") {
-            setLoadError("Please verify your email before managing invoices.");
+            setLoadError("Verify your email before managing invoices.");
             router.replace(`${DASHBOARD_AUTH_PATH}&reason=verify-email`);
           } else {
             router.replace(DASHBOARD_AUTH_PATH);
           }
           return false;
         }
-        setLoadError(
-          error instanceof ApiError ? error.message : "Failed to update invoice."
+        const { message } = describeRequestError(
+          error,
+          "Couldn't update that invoice."
         );
+        setLoadError(message);
         return false;
       } finally {
         setActiveActionInvoiceId(null);
@@ -125,21 +136,22 @@ export default function DashboardPage() {
     const ok = await patchInvoice(invoiceId, { action: "settle" });
     if (ok) {
       setSelectedInvoice(null);
+      setNotice("Marked as paid.");
       await fetchInvoices();
     }
   };
 
-  const softDeleteInvoice = async (invoiceId: string) => {
-    const confirmed = window.confirm(
-      "Delete this invoice from active lists? You can keep it in the database."
-    );
-    if (!confirmed) {
+  const confirmDelete = async () => {
+    const target = pendingDelete;
+    if (!target) {
       return;
     }
 
-    const ok = await patchInvoice(invoiceId, { action: "soft_delete" });
+    const ok = await patchInvoice(target._id, { action: "soft_delete" });
+    setPendingDelete(null);
     if (ok) {
       setSelectedInvoice(null);
+      setNotice(`${target.invoiceNumber || "Invoice"} removed from your list.`);
       await fetchInvoices();
     }
   };
@@ -162,14 +174,37 @@ export default function DashboardPage() {
       return status === "sent" || status === "overdue";
     });
 
-    const totalRevenue = paid.reduce((sum, invoice) => sum + invoice.total, 0);
-    const pendingAmount = outstanding.reduce((sum, invoice) => sum + invoice.total, 0);
+    // Totals are only meaningful within one currency. This used to sum every
+    // invoice into one number and label it with whatever currency the first
+    // invoice happened to use, so an INR + USD account read a total that was
+    // arithmetically real and financially meaningless. Group by currency and
+    // report the dominant one, saying plainly when others are excluded.
+    const sumByCurrency = (records: InvoiceRecord[]) =>
+      records.reduce<Record<string, number>>((acc, invoice) => {
+        const code = invoice.currency || "INR";
+        acc[code] = (acc[code] || 0) + invoice.total;
+        return acc;
+      }, {});
+
+    const counts = invoices.reduce<Record<string, number>>((acc, invoice) => {
+      const code = invoice.currency || "INR";
+      acc[code] = (acc[code] || 0) + 1;
+      return acc;
+    }, {});
+
+    const currencies = Object.keys(counts);
+    const primaryCurrency =
+      currencies.sort((a, b) => counts[b] - counts[a])[0] || "INR";
+
+    const revenueByCurrency = sumByCurrency(paid);
+    const pendingByCurrency = sumByCurrency(outstanding);
 
     return {
       count: invoices.length,
-      totalRevenue,
-      pendingAmount,
-      currency: invoices[0]?.currency || "INR",
+      totalRevenue: revenueByCurrency[primaryCurrency] || 0,
+      pendingAmount: pendingByCurrency[primaryCurrency] || 0,
+      currency: primaryCurrency,
+      otherCurrencyCount: currencies.length - 1,
     };
   }, [invoices]);
 
@@ -212,9 +247,16 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
+              <p className="break-words text-3xl font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrency(summary.totalRevenue, summary.currency)}
               </p>
+              {summary.otherCurrencyCount > 0 ? (
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {summary.currency} only — {summary.otherCurrencyCount} other{" "}
+                  {summary.otherCurrencyCount === 1 ? "currency" : "currencies"} not
+                  included
+                </p>
+              ) : null}
             </CardContent>
           </Card>
           <Card className="border-slate-200 dark:border-slate-700 dark:bg-slate-900">
@@ -224,9 +266,14 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
+              <p className="break-words text-3xl font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrency(summary.pendingAmount, summary.currency)}
               </p>
+              {summary.otherCurrencyCount > 0 ? (
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {summary.currency} only
+                </p>
+              ) : null}
             </CardContent>
           </Card>
         </section>
@@ -243,8 +290,18 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="p-0">
             {loadError ? (
-              <div className="border-l-4 border-rose-300 bg-rose-50 px-6 py-5 text-sm text-rose-700 dark:border-rose-400/60 dark:bg-rose-500/15 dark:text-rose-200">
-                {loadError}
+              <div className="p-4">
+                <AlertBanner
+                  onRetry={canRetryLoad ? fetchInvoices : undefined}
+                >
+                  {loadError}
+                </AlertBanner>
+              </div>
+            ) : null}
+
+            {notice ? (
+              <div className="p-4">
+                <AlertBanner tone="success">{notice}</AlertBanner>
               </div>
             ) : null}
 
@@ -254,7 +311,9 @@ export default function DashboardPage() {
                 Loading invoices...
               </div>
             ) : invoices.length ? (
-              <Table>
+              // min-w keeps money and date columns at a readable width and lets
+              // the wrapper scroll, instead of crushing seven columns into 375px.
+              <Table className="min-w-[920px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Invoice</TableHead>
@@ -272,10 +331,13 @@ export default function DashboardPage() {
                     const isActioning = activeActionInvoiceId === invoice._id;
                     return (
                       <TableRow key={invoice._id}>
-                        <TableCell className="font-medium text-slate-800 dark:text-slate-100">
+                        <TableCell className="max-w-[180px] truncate font-medium text-slate-800 dark:text-slate-100">
                           {invoice.invoiceNumber}
                         </TableCell>
-                        <TableCell className="text-slate-600 dark:text-slate-300">
+                        <TableCell
+                          className="max-w-[220px] truncate text-slate-600 dark:text-slate-300"
+                          title={invoice.billTo}
+                        >
                           {invoice.billTo}
                         </TableCell>
                         <TableCell>
@@ -285,13 +347,13 @@ export default function DashboardPage() {
                             {status}
                           </span>
                         </TableCell>
-                        <TableCell className="text-slate-600 dark:text-slate-300">
+                        <TableCell className="whitespace-nowrap text-slate-600 dark:text-slate-300">
                           {formatDateLong(invoice.invoiceDate)}
                         </TableCell>
-                        <TableCell className="text-slate-600 dark:text-slate-300">
+                        <TableCell className="whitespace-nowrap text-slate-600 dark:text-slate-300">
                           {formatDateLong(invoice.dueDate)}
                         </TableCell>
-                        <TableCell className="font-medium text-slate-800 dark:text-slate-100">
+                        <TableCell className="whitespace-nowrap font-medium text-slate-800 dark:text-slate-100">
                           {formatCurrency(invoice.total, invoice.currency)}
                         </TableCell>
                         <TableCell>
@@ -301,6 +363,7 @@ export default function DashboardPage() {
                               variant="outline"
                               onClick={() => setSelectedInvoice(invoice)}
                               disabled={isActioning}
+                              aria-label={`View ${invoice.invoiceNumber}`}
                             >
                               <EyeOpenIcon className="w-4 h-4" />
                               View
@@ -310,6 +373,7 @@ export default function DashboardPage() {
                               variant="outline"
                               onClick={() => router.push(`/create-invoice/${invoice._id}`)}
                               disabled={isActioning}
+                              aria-label={`Edit ${invoice.invoiceNumber}`}
                             >
                               <Pencil1Icon className="w-4 h-4" />
                               Edit
@@ -320,6 +384,7 @@ export default function DashboardPage() {
                                 variant="outline"
                                 onClick={() => settleInvoice(invoice._id)}
                                 disabled={isActioning}
+                                aria-label={`Mark ${invoice.invoiceNumber} as paid`}
                               >
                                 Settle
                               </Button>
@@ -328,8 +393,9 @@ export default function DashboardPage() {
                               size="sm"
                               variant="outline"
                               className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:border-rose-500/50 dark:text-rose-300 dark:hover:bg-rose-500/20 dark:hover:text-rose-200"
-                              onClick={() => softDeleteInvoice(invoice._id)}
+                              onClick={() => setPendingDelete(invoice)}
                               disabled={isActioning}
+                              aria-label={`Delete ${invoice.invoiceNumber}`}
                             >
                               Delete
                             </Button>
@@ -340,10 +406,16 @@ export default function DashboardPage() {
                   })}
                 </TableBody>
               </Table>
-            ) : (
-              <div className="px-6 py-10 text-center">
-                <p className="text-slate-600 dark:text-slate-300">No invoices yet.</p>
-                <Button className="mt-4" onClick={() => router.push("/create-invoice")}>
+            ) : loadError ? null : (
+              <div className="px-6 py-12 text-center">
+                <p className="text-base font-medium text-slate-800 dark:text-slate-100">
+                  No invoices yet
+                </p>
+                <p className="mx-auto mt-1 max-w-sm text-sm text-slate-600 dark:text-slate-300">
+                  Your first one takes about a minute — or describe the job in a
+                  sentence and let the assistant fill it in.
+                </p>
+                <Button className="mt-5" onClick={() => router.push("/create-invoice")}>
                   <PlusIcon className="w-4 h-4" />
                   Create your first invoice
                 </Button>
@@ -353,12 +425,33 @@ export default function DashboardPage() {
         </Card>
       </div>
 
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title="Remove this invoice?"
+        description={
+          <>
+            <strong className="font-semibold text-slate-800 dark:text-slate-100">
+              {pendingDelete?.invoiceNumber || "This invoice"}
+            </strong>{" "}
+            for {pendingDelete?.billTo || "this client"} will disappear from your
+            dashboard and stop counting toward your totals. It is not erased — the
+            record is kept — but there is no way to bring it back from here.
+          </>
+        }
+        confirmLabel="Remove invoice"
+        isPending={Boolean(
+          pendingDelete && activeActionInvoiceId === pendingDelete._id
+        )}
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
+
       {selectedInvoice ? (
         <InvoiceModal
           invoice={selectedInvoice}
           onClose={() => setSelectedInvoice(null)}
           onSettle={settleInvoice}
-          onDelete={softDeleteInvoice}
+          onDelete={() => setPendingDelete(selectedInvoice)}
           isMutating={activeActionInvoiceId === selectedInvoice._id}
           onEdit={(id) => {
             setSelectedInvoice(null);

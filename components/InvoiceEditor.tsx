@@ -5,14 +5,16 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DatePickerField } from "@/components/ui/date-picker-field";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Textarea } from "@/components/ui/textarea";
+import { AlertBanner, LiveStatus } from "@/components/ui/alert-banner";
 import InvoiceAiAssistant from "@/components/InvoiceAiAssistant";
 import {
   invoicesApi,
   getAuthToken,
-  ApiError,
+  describeRequestError,
   UnauthenticatedError,
 } from "@/lib/api-client";
 import type { InvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/contracts";
@@ -52,6 +54,24 @@ const statusClassName: Record<InvoiceStatus, string> = {
   overdue: "bg-rose-100 text-rose-700",
 };
 
+// Input ceilings. The server recomputes and clamps every total, so these exist
+// to stop a paste or a stuck key from producing an invoice no client would
+// accept — and to keep the preview and the printed sheet legible.
+const TEXT_FIELD_MAX = 120;
+const INVOICE_NUMBER_MAX = 40;
+const ADDRESS_FIELD_MAX = 400;
+const NOTES_FIELD_MAX = 1000;
+const URL_FIELD_MAX = 2048;
+const MAX_ITEM_QUANTITY = 100_000;
+const MAX_ITEM_UNIT_PRICE = 100_000_000;
+const MAX_LINE_ITEMS = 100;
+
+const clampQuantity = (value: number) =>
+  Math.min(MAX_ITEM_QUANTITY, Math.max(1, Math.round(value)));
+
+const clampUnitPrice = (value: number) =>
+  Math.min(MAX_ITEM_UNIT_PRICE, Math.max(0, value));
+
 export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const router = useRouter();
   const [invoice, setInvoice] = useState<InvoiceFormState>(
@@ -61,6 +81,10 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const [isLoadingInvoice, setIsLoadingInvoice] = useState(mode === "edit");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  // Set only when repeating the exact failed request could succeed, so the
+  // banner never offers a retry for something the user has to fix by hand.
+  const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null);
+  const [saveStatus, setSaveStatus] = useState("");
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const [cgstMode, setCgstMode] = useState<"percent" | "amount">("amount");
   const [sgstMode, setSgstMode] = useState<"percent" | "amount">("amount");
@@ -85,43 +109,53 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     [invoice]
   );
 
+  /** Validation and other failures the user must fix themselves: no retry. */
+  const showError = useCallback((message: string) => {
+    setError(message);
+    setErrorRetry(null);
+  }, []);
+
+  const fetchInvoice = useCallback(async () => {
+    if (!invoiceId) {
+      showError("This edit link is missing an invoice id.");
+      setIsLoadingInvoice(false);
+      return;
+    }
+
+    setIsLoadingInvoice(true);
+    setError("");
+    setErrorRetry(null);
+
+    try {
+      const data = await invoicesApi.get(invoiceId);
+      setInvoice(mapInvoiceRecordToFormState(data));
+    } catch (err) {
+      if (err instanceof UnauthenticatedError) {
+        if (err.reason === "verify-email") {
+          showError("Verify your email before editing invoices.");
+          router.replace(`${authRedirectPath}&reason=verify-email`);
+        } else {
+          router.replace(authRedirectPath);
+        }
+        return;
+      }
+      const { message, canRetry } = describeRequestError(
+        err,
+        "Couldn't open this invoice for editing."
+      );
+      setError(message);
+      setErrorRetry(canRetry ? () => fetchInvoice : null);
+    } finally {
+      setIsLoadingInvoice(false);
+    }
+  }, [authRedirectPath, invoiceId, router, showError]);
+
   useEffect(() => {
     if (mode !== "edit") {
       return;
     }
-
-    const fetchInvoice = async () => {
-      if (!invoiceId) {
-        setError("Missing invoice id");
-        setIsLoadingInvoice(false);
-        return;
-      }
-
-      try {
-        const data = await invoicesApi.get(invoiceId);
-        setInvoice(mapInvoiceRecordToFormState(data));
-      } catch (err) {
-        if (err instanceof UnauthenticatedError) {
-          if (err.reason === "verify-email") {
-            setError("Please verify your email before editing invoices.");
-            router.replace(`${authRedirectPath}&reason=verify-email`);
-          } else {
-            router.replace(authRedirectPath);
-          }
-          return;
-        }
-        setError(
-          err instanceof ApiError
-            ? err.message
-            : "Unable to load invoice for editing."
-        );
-      } finally {
-        setIsLoadingInvoice(false);
-      }
-    };
-
     fetchInvoice();
-  }, [authRedirectPath, invoiceId, mode, router]);
+  }, [fetchInvoice, mode]);
 
   useEffect(() => {
     setLogoLoadFailed(false);
@@ -153,18 +187,18 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     } catch (err) {
       if (err instanceof UnauthenticatedError) {
         if (err.reason === "verify-email") {
-          setError("Please verify your email before using AI assistant.");
+          showError("Verify your email before using the AI assistant.");
           router.replace(`${authRedirectPath}&reason=verify-email`);
         } else {
           router.replace(authRedirectPath);
         }
         return null;
       }
-      setError("Unable to verify your session. Please sign in again.");
+      showError("Your session expired. Sign in again to continue.");
       router.replace(authRedirectPath);
       return null;
     }
-  }, [authRedirectPath, router]);
+  }, [authRedirectPath, router, showError]);
 
   const applyAiPatch = useCallback((patch: InvoiceAssistantPatch) => {
     let appliedFields: string[] = [];
@@ -201,10 +235,18 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   };
 
   const addItem = () => {
-    setInvoice((prev) => ({
-      ...prev,
-      items: [...prev.items, { description: "", quantity: 1, unitPrice: 0 }],
-    }));
+    setInvoice((prev) => {
+      if (prev.items.length >= MAX_LINE_ITEMS) {
+        showError(
+          `An invoice can hold ${MAX_LINE_ITEMS} line items. Combine a few, or split this into a second invoice.`
+        );
+        return prev;
+      }
+      return {
+        ...prev,
+        items: [...prev.items, { description: "", quantity: 1, unitPrice: 0 }],
+      };
+    });
   };
 
   const removeItem = (index: number) => {
@@ -234,67 +276,110 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   };
 
   const saveInvoice = async (status: InvoiceStatus = invoice.status) => {
+    if (isSaving) {
+      return;
+    }
     setError("");
+    setErrorRetry(null);
 
-    if (!invoice.companyName.trim() || !invoice.billTo.trim()) {
-      setError("Company name and bill-to name are required.");
+    // Each check names the one field to fix, so the message maps to a single
+    // place on screen rather than making the user hunt through the form.
+    if (!invoice.companyName.trim()) {
+      showError("Add your company name — it appears at the top of the invoice.");
+      return;
+    }
+
+    if (!invoice.billTo.trim()) {
+      showError("Add a client name so the invoice knows who it is addressed to.");
       return;
     }
 
     if (!invoice.invoiceNumber.trim()) {
-      setError("Invoice number is required.");
+      showError("Give this invoice a number, for example INV-2026-014.");
       return;
     }
 
-    if (
-      !invoice.invoiceDate ||
-      !invoice.dueDate ||
-      Number.isNaN(new Date(invoice.invoiceDate).getTime()) ||
-      Number.isNaN(new Date(invoice.dueDate).getTime())
-    ) {
-      setError("Invoice and due dates are required.");
+    if (!invoice.invoiceDate || Number.isNaN(new Date(invoice.invoiceDate).getTime())) {
+      showError("Pick an invoice date.");
+      return;
+    }
+
+    if (!invoice.dueDate || Number.isNaN(new Date(invoice.dueDate).getTime())) {
+      showError("Pick a due date.");
+      return;
+    }
+
+    if (new Date(invoice.dueDate) < new Date(invoice.invoiceDate)) {
+      showError("The due date falls before the invoice date. Check both dates.");
       return;
     }
 
     const validItems = invoice.items.filter((item) => item.description.trim());
     if (validItems.length === 0) {
-      setError("Add at least one line item with a description.");
+      showError("Add at least one line item with a description.");
       return;
     }
 
-    try {
-      setIsSaving(true);
+    const runSave = async () => {
+      try {
+        setIsSaving(true);
+        setSaveStatus(mode === "edit" ? "Saving changes…" : "Creating invoice…");
 
-      const payload = mapFormStateToPayload({
-        ...invoice,
-        status,
-      });
+        const payload = mapFormStateToPayload({
+          ...invoice,
+          status,
+        });
 
-      if (mode === "edit") {
-        await invoicesApi.update(invoiceId || "", payload);
-      } else {
-        await invoicesApi.create(payload);
-      }
-
-      router.push("/dashboard");
-    } catch (err) {
-      if (err instanceof UnauthenticatedError) {
-        if (err.reason === "verify-email") {
-          setError("Please verify your email before saving invoices.");
-          router.replace(`${authRedirectPath}&reason=verify-email`);
+        if (mode === "edit") {
+          await invoicesApi.update(invoiceId || "", payload);
         } else {
-          router.replace(authRedirectPath);
+          await invoicesApi.create(payload);
         }
-        return;
+
+        setSaveStatus("Saved. Returning to dashboard.");
+        router.push("/dashboard");
+      } catch (err) {
+        setSaveStatus("");
+        if (err instanceof UnauthenticatedError) {
+          if (err.reason === "verify-email") {
+            showError("Verify your email before saving invoices.");
+            router.replace(`${authRedirectPath}&reason=verify-email`);
+          } else {
+            router.replace(authRedirectPath);
+          }
+          return;
+        }
+        const { message, canRetry } = describeRequestError(
+          err,
+          "Couldn't save this invoice."
+        );
+        // Nothing was navigated away from, so the form still holds every value
+        // the user typed; retrying re-sends exactly what failed.
+        setError(message);
+        setErrorRetry(canRetry ? () => runSave : null);
+      } finally {
+        setIsSaving(false);
       }
-      setError(err instanceof ApiError ? err.message : "Failed to save invoice.");
-    } finally {
-      setIsSaving(false);
-    }
+    };
+
+    await runSave();
   };
 
   const previewItems = invoice.items.filter((item) => item.description.trim());
   const showCompanyLogo = Boolean(invoice.companyLogo.trim()) && !logoLoadFailed;
+
+  // A logo that fails to load is silent in the preview and on the printed
+  // sheet, so say it here rather than letting the user discover it after send.
+  const logoHint = logoLoadFailed
+    ? "That image didn't load. Check the link is public and points straight at the file."
+    : "Must be a public https:// link to an image file.";
+
+  const dueDateHint =
+    invoice.invoiceDate &&
+    invoice.dueDate &&
+    new Date(invoice.dueDate) < new Date(invoice.invoiceDate)
+      ? "This is before the invoice date."
+      : undefined;
 
   if (isLoadingInvoice) {
     return (
@@ -380,10 +465,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
           </div>
         ) : null}
 
+        <LiveStatus>{saveStatus}</LiveStatus>
+
         {error ? (
-          <div className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/15 dark:text-rose-200">
+          <AlertBanner className="mb-4" onRetry={errorRetry ?? undefined}>
             {error}
-          </div>
+          </AlertBanner>
         ) : null}
 
         <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
@@ -399,32 +486,82 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   Seller
                 </h2>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Input
-                    placeholder="Company name"
-                    value={invoice.companyName}
-                    onChange={(event) => updateField("companyName", event.target.value)}
-                  />
-                  <Input
-                    placeholder="Company email"
-                    value={invoice.companyEmail}
-                    onChange={(event) => updateField("companyEmail", event.target.value)}
-                  />
-                  <Input
-                    placeholder="Company phone"
-                    value={invoice.companyPhone}
-                    onChange={(event) => updateField("companyPhone", event.target.value)}
-                  />
-                  <Input
-                    placeholder="Company logo URL (optional)"
-                    value={invoice.companyLogo}
-                    onChange={(event) => updateField("companyLogo", event.target.value)}
-                  />
-                  <Textarea
-                    placeholder="Company address"
-                    className="sm:col-span-2"
-                    value={invoice.companyAddress}
-                    onChange={(event) => updateField("companyAddress", event.target.value)}
-                  />
+                  <Field label="Company name">
+                    {(field) => (
+                      <Input
+                        {...field}
+                        maxLength={TEXT_FIELD_MAX}
+                        placeholder="Acme Studio"
+                        value={invoice.companyName}
+                        onChange={(event) =>
+                          updateField("companyName", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label="Company email">
+                    {(field) => (
+                      <Input
+                        {...field}
+                        type="email"
+                        inputMode="email"
+                        autoComplete="email"
+                        maxLength={TEXT_FIELD_MAX}
+                        placeholder="billing@acme.studio"
+                        value={invoice.companyEmail}
+                        onChange={(event) =>
+                          updateField("companyEmail", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label="Company phone" optional>
+                    {(field) => (
+                      <Input
+                        {...field}
+                        type="tel"
+                        inputMode="tel"
+                        maxLength={TEXT_FIELD_MAX}
+                        placeholder="+91 98765 43210"
+                        value={invoice.companyPhone}
+                        onChange={(event) =>
+                          updateField("companyPhone", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field
+                    label="Company logo URL"
+                    optional
+                    hint={logoHint}
+                  >
+                    {(field) => (
+                      <Input
+                        {...field}
+                        type="url"
+                        inputMode="url"
+                        maxLength={URL_FIELD_MAX}
+                        placeholder="https://acme.studio/logo.png"
+                        value={invoice.companyLogo}
+                        onChange={(event) =>
+                          updateField("companyLogo", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label="Company address" className="sm:col-span-2">
+                    {(field) => (
+                      <Textarea
+                        {...field}
+                        maxLength={ADDRESS_FIELD_MAX}
+                        placeholder="221B Residency Road&#10;Bengaluru, KA 560025"
+                        value={invoice.companyAddress}
+                        onChange={(event) =>
+                          updateField("companyAddress", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
                 </div>
               </section>
 
@@ -433,22 +570,45 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   Client
                 </h2>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Input
-                    placeholder="Client name"
-                    value={invoice.billTo}
-                    onChange={(event) => updateField("billTo", event.target.value)}
-                  />
-                  <Input
-                    placeholder="Client email"
-                    value={invoice.billToEmail}
-                    onChange={(event) => updateField("billToEmail", event.target.value)}
-                  />
-                  <Textarea
-                    placeholder="Client billing address"
-                    className="sm:col-span-2"
-                    value={invoice.billToAddress}
-                    onChange={(event) => updateField("billToAddress", event.target.value)}
-                  />
+                  <Field label="Client name">
+                    {(field) => (
+                      <Input
+                        {...field}
+                        maxLength={TEXT_FIELD_MAX}
+                        placeholder="Nova Health Pvt Ltd"
+                        value={invoice.billTo}
+                        onChange={(event) => updateField("billTo", event.target.value)}
+                      />
+                    )}
+                  </Field>
+                  <Field label="Client email" optional>
+                    {(field) => (
+                      <Input
+                        {...field}
+                        type="email"
+                        inputMode="email"
+                        maxLength={TEXT_FIELD_MAX}
+                        placeholder="accounts@novahealth.in"
+                        value={invoice.billToEmail}
+                        onChange={(event) =>
+                          updateField("billToEmail", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label="Client billing address" className="sm:col-span-2">
+                    {(field) => (
+                      <Textarea
+                        {...field}
+                        maxLength={ADDRESS_FIELD_MAX}
+                        placeholder="4th Floor, Prestige Tower&#10;Mumbai, MH 400001"
+                        value={invoice.billToAddress}
+                        onChange={(event) =>
+                          updateField("billToAddress", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
                 </div>
               </section>
 
@@ -457,50 +617,86 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   Meta
                 </h2>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <Input
-                    placeholder="Invoice number"
-                    value={invoice.invoiceNumber}
-                    onChange={(event) =>
-                      updateField("invoiceNumber", event.target.value)
-                    }
-                  />
-                  <DatePickerField
-                    value={invoice.invoiceDate}
-                    onValueChange={(value) => updateField("invoiceDate", value)}
-                    placeholder="Invoice date"
-                  />
-                  <DatePickerField
-                    value={invoice.dueDate}
-                    onValueChange={(value) => updateField("dueDate", value)}
-                    placeholder="Due date"
-                  />
-                  <SelectField
-                    value={invoice.currency}
-                    onValueChange={(value) => updateField("currency", value)}
-                    options={CURRENCY_OPTIONS.map((currencyCode) => ({
-                      value: currencyCode,
-                      label: currencyCode,
-                    }))}
-                    className="text-slate-900 dark:text-slate-100"
-                  />
-                  <SelectField
-                    value={invoice.status}
-                    onValueChange={(value) =>
-                      updateField("status", value as InvoiceStatus)
-                    }
-                    options={[
-                      { value: "draft", label: "Draft" },
-                      { value: "sent", label: "Sent" },
-                      { value: "paid", label: "Paid" },
-                      { value: "overdue", label: "Overdue" },
-                    ]}
-                    className="text-slate-900 dark:text-slate-100"
-                  />
-                  <Input
-                    placeholder="Payment terms"
-                    value={invoice.terms}
-                    onChange={(event) => updateField("terms", event.target.value)}
-                  />
+                  <Field label="Invoice number">
+                    {(field) => (
+                      <Input
+                        {...field}
+                        maxLength={INVOICE_NUMBER_MAX}
+                        placeholder="INV-2026-014"
+                        value={invoice.invoiceNumber}
+                        onChange={(event) =>
+                          updateField("invoiceNumber", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field label="Invoice date">
+                    {(field, labelId) => (
+                      <DatePickerField
+                        {...field}
+                        aria-labelledby={`${labelId} ${field.id}`}
+                        value={invoice.invoiceDate}
+                        onValueChange={(value) => updateField("invoiceDate", value)}
+                        placeholder="Pick a date"
+                      />
+                    )}
+                  </Field>
+                  <Field label="Due date" hint={dueDateHint}>
+                    {(field, labelId) => (
+                      <DatePickerField
+                        {...field}
+                        aria-labelledby={`${labelId} ${field.id}`}
+                        value={invoice.dueDate}
+                        onValueChange={(value) => updateField("dueDate", value)}
+                        placeholder="Pick a date"
+                      />
+                    )}
+                  </Field>
+                  <Field label="Currency">
+                    {(field, labelId) => (
+                      <SelectField
+                        {...field}
+                        aria-labelledby={`${labelId} ${field.id}`}
+                        value={invoice.currency}
+                        onValueChange={(value) => updateField("currency", value)}
+                        options={CURRENCY_OPTIONS.map((currencyCode) => ({
+                          value: currencyCode,
+                          label: currencyCode,
+                        }))}
+                        className="text-slate-900 dark:text-slate-100"
+                      />
+                    )}
+                  </Field>
+                  <Field label="Status">
+                    {(field, labelId) => (
+                      <SelectField
+                        {...field}
+                        aria-labelledby={`${labelId} ${field.id}`}
+                        value={invoice.status}
+                        onValueChange={(value) =>
+                          updateField("status", value as InvoiceStatus)
+                        }
+                        options={[
+                          { value: "draft", label: "Draft" },
+                          { value: "sent", label: "Sent" },
+                          { value: "paid", label: "Paid" },
+                          { value: "overdue", label: "Overdue" },
+                        ]}
+                        className="text-slate-900 dark:text-slate-100"
+                      />
+                    )}
+                  </Field>
+                  <Field label="Payment terms" optional>
+                    {(field) => (
+                      <Input
+                        {...field}
+                        maxLength={TEXT_FIELD_MAX}
+                        placeholder="Net 30"
+                        value={invoice.terms}
+                        onChange={(event) => updateField("terms", event.target.value)}
+                      />
+                    )}
+                  </Field>
                 </div>
               </section>
 
@@ -516,7 +712,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 </div>
                 <div className="overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700">
                   <div className="hidden md:block">
-                    <div className="grid min-w-[680px] grid-cols-[1.6fr_120px_150px_140px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                    <div className="grid min-w-[680px] grid-cols-[1.6fr_120px_150px_140px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                       <div>Description</div>
                       <div>Qty</div>
                       <div>Unit Price</div>
@@ -530,6 +726,8 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                           key={`item-${index}`}
                         >
                           <Input
+                            aria-label={`Line ${index + 1} description`}
+                            maxLength={TEXT_FIELD_MAX}
                             placeholder="e.g. Monthly retainer"
                             value={item.description}
                             onChange={(event) =>
@@ -537,21 +735,25 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                             }
                           />
                           <Input
+                            aria-label={`Line ${index + 1} quantity`}
                             type="number"
                             min={1}
+                            max={MAX_ITEM_QUANTITY}
                             value={item.quantity}
                             onFocus={selectZeroValueOnFocus}
                             onChange={(event) =>
                               updateItem(
                                 index,
                                 "quantity",
-                                Math.max(1, parseNumberInput(event.target.value, 1))
+                                clampQuantity(parseNumberInput(event.target.value, 1))
                               )
                             }
                           />
                           <Input
+                            aria-label={`Line ${index + 1} unit price`}
                             type="number"
                             min={0}
+                            max={MAX_ITEM_UNIT_PRICE}
                             step="0.01"
                             value={item.unitPrice}
                             onFocus={selectZeroValueOnFocus}
@@ -559,12 +761,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                               updateItem(
                                 index,
                                 "unitPrice",
-                                Math.max(0, parseNumberInput(event.target.value, 0))
+                                clampUnitPrice(parseNumberInput(event.target.value, 0))
                               )
                             }
                             placeholder="0.00"
                           />
-                          <div className="text-sm font-medium text-right text-slate-700 dark:text-slate-200">
+                          <div className="min-w-0 truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200">
                             {formatCurrency(
                               Math.max(0, item.quantity) * Math.max(0, item.unitPrice),
                               invoice.currency
@@ -591,42 +793,60 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                         key={`item-mobile-${index}`}
                       >
                         <div className="space-y-2">
-                          <Input
-                            placeholder="Description"
-                            value={item.description}
-                            onChange={(event) =>
-                              updateItem(index, "description", event.target.value)
-                            }
-                          />
+                          <Field label={`Line ${index + 1} description`}>
+                            {(field) => (
+                              <Input
+                                {...field}
+                                maxLength={TEXT_FIELD_MAX}
+                                placeholder="e.g. Monthly retainer"
+                                value={item.description}
+                                onChange={(event) =>
+                                  updateItem(index, "description", event.target.value)
+                                }
+                              />
+                            )}
+                          </Field>
                           <div className="grid grid-cols-2 gap-2">
-                            <Input
-                              type="number"
-                              min={1}
-                              value={item.quantity}
-                              onFocus={selectZeroValueOnFocus}
-                              onChange={(event) =>
-                                updateItem(
-                                  index,
-                                  "quantity",
-                                  Math.max(1, parseNumberInput(event.target.value, 1))
-                                )
-                              }
-                            />
-                            <Input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={item.unitPrice}
-                              onFocus={selectZeroValueOnFocus}
-                              onChange={(event) =>
-                                updateItem(
-                                  index,
-                                  "unitPrice",
-                                  Math.max(0, parseNumberInput(event.target.value, 0))
-                                )
-                              }
-                              placeholder="Unit price"
-                            />
+                            <Field label="Qty">
+                              {(field) => (
+                                <Input
+                                  {...field}
+                                  type="number"
+                                  min={1}
+                                  max={MAX_ITEM_QUANTITY}
+                                  value={item.quantity}
+                                  onFocus={selectZeroValueOnFocus}
+                                  onChange={(event) =>
+                                    updateItem(
+                                      index,
+                                      "quantity",
+                                      clampQuantity(parseNumberInput(event.target.value, 1))
+                                    )
+                                  }
+                                />
+                              )}
+                            </Field>
+                            <Field label="Unit price">
+                              {(field) => (
+                                <Input
+                                  {...field}
+                                  type="number"
+                                  min={0}
+                                  max={MAX_ITEM_UNIT_PRICE}
+                                  step="0.01"
+                                  value={item.unitPrice}
+                                  onFocus={selectZeroValueOnFocus}
+                                  onChange={(event) =>
+                                    updateItem(
+                                      index,
+                                      "unitPrice",
+                                      clampUnitPrice(parseNumberInput(event.target.value, 0))
+                                    )
+                                  }
+                                  placeholder="0.00"
+                                />
+                              )}
+                            </Field>
                           </div>
                         </div>
                         <div className="mt-3 flex items-center justify-between text-sm">
@@ -734,6 +954,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       variant="outline"
                       size="sm"
                       className="shrink-0 px-3 font-mono text-xs"
+                      aria-label={
+                        cgstMode === "percent"
+                          ? "CGST entered as a percentage. Switch to a fixed amount."
+                          : "CGST entered as a fixed amount. Switch to a percentage."
+                      }
                       onClick={() => {
                         if (cgstMode === "amount") {
                           setCgstMode("percent");
@@ -786,6 +1011,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       variant="outline"
                       size="sm"
                       className="shrink-0 px-3 font-mono text-xs"
+                      aria-label={
+                        sgstMode === "percent"
+                          ? "SGST entered as a percentage. Switch to a fixed amount."
+                          : "SGST entered as a fixed amount. Switch to a percentage."
+                      }
                       onClick={() => {
                         if (sgstMode === "amount") {
                           setSgstMode("percent");
@@ -810,16 +1040,30 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               </section>
 
               <section className="grid gap-3 sm:grid-cols-2">
-                <Textarea
-                  placeholder="Payment information"
-                  value={invoice.paymentInfo}
-                  onChange={(event) => updateField("paymentInfo", event.target.value)}
-                />
-                <Textarea
-                  placeholder="Additional notes"
-                  value={invoice.notes}
-                  onChange={(event) => updateField("notes", event.target.value)}
-                />
+                <Field label="Payment information" optional>
+                  {(field) => (
+                    <Textarea
+                      {...field}
+                      maxLength={NOTES_FIELD_MAX}
+                      placeholder="Account name, account number, IFSC, UPI ID"
+                      value={invoice.paymentInfo}
+                      onChange={(event) =>
+                        updateField("paymentInfo", event.target.value)
+                      }
+                    />
+                  )}
+                </Field>
+                <Field label="Additional notes" optional>
+                  {(field) => (
+                    <Textarea
+                      {...field}
+                      maxLength={NOTES_FIELD_MAX}
+                      placeholder="Thanks for your business."
+                      value={invoice.notes}
+                      onChange={(event) => updateField("notes", event.target.value)}
+                    />
+                  )}
+                </Field>
               </section>
             </CardContent>
           </Card>
@@ -901,7 +1145,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 </div>
 
                 <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
-                  <div className="grid grid-cols-[1.5fr_70px_100px] bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                  <div className="grid grid-cols-[1.5fr_70px_100px] bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                     <div>Item</div>
                     <div className="text-right">Qty</div>
                     <div className="text-right">Amount</div>

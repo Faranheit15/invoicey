@@ -23,6 +23,9 @@ interface SelectFieldProps {
   disabled?: boolean;
   className?: string;
   placeholder?: string;
+  id?: string;
+  "aria-labelledby"?: string;
+  "aria-describedby"?: string;
 }
 
 export function SelectField({
@@ -32,6 +35,9 @@ export function SelectField({
   disabled = false,
   className,
   placeholder = "Select option",
+  id,
+  "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
 }: SelectFieldProps) {
   const selectedOption = options.find((option) => option.value === value);
 
@@ -41,6 +47,9 @@ export function SelectField({
         <Button
           variant="outline"
           type="button"
+          id={id}
+          aria-labelledby={ariaLabelledBy}
+          aria-describedby={ariaDescribedBy}
           className={cn(
             "h-10 w-full justify-between px-3 py-2 text-sm font-normal",
             className
