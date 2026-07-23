@@ -25,7 +25,7 @@ const variantClass = {
   onDark: "text-xs uppercase tracking-eyebrow text-slate-300",
   /** Carries the sky accent, for the AI panel and other tinted surfaces. */
   accent:
-    "text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300",
+    "text-xs font-semibold uppercase tracking-wider text-sky-700 dark:text-sky-300",
 } as const;
 
 export type MicroLabelVariant = keyof typeof variantClass;

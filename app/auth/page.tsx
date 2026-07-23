@@ -538,7 +538,7 @@ export default function AuthPage() {
                     <div className="space-y-1.5">
                       <label
                         htmlFor="login-email"
-                        className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
+                        className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                       >
                         Email
                       </label>
@@ -557,7 +557,7 @@ export default function AuthPage() {
                       <div className="flex items-center justify-between">
                         <label
                           htmlFor="login-password"
-                          className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
+                          className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                         >
                           Password
                         </label>
@@ -604,7 +604,7 @@ export default function AuthPage() {
                     <div className="space-y-1.5">
                       <label
                         htmlFor="signup-email"
-                        className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
+                        className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                       >
                         Email
                       </label>
@@ -622,7 +622,7 @@ export default function AuthPage() {
                     <div className="space-y-1.5">
                       <label
                         htmlFor="signup-password"
-                        className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
+                        className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                       >
                         Password
                       </label>
@@ -640,7 +640,7 @@ export default function AuthPage() {
                     <div className="space-y-1.5">
                       <label
                         htmlFor="signup-confirm-password"
-                        className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300"
+                        className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                       >
                         Confirm Password
                       </label>

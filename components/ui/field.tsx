@@ -48,7 +48,11 @@ export function Field({ label, children, hint, optional, className }: FieldProps
       <label
         id={labelId}
         htmlFor={id}
-        className="flex items-baseline gap-1.5 text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+        // No tracking: this label is sentence case, not uppercase, and letter-
+        // spacing on lowercase text at 12px only loosens it. Case is what
+        // separates a field label from the uppercase section label above it —
+        // the two were previously distinguished by 0.3px of tracking alone.
+        className="flex items-baseline gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300"
       >
         {label}
         {/* The leading space is load-bearing: without a text node between the

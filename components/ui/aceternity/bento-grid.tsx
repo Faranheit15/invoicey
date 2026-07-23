@@ -58,7 +58,7 @@ export function BentoGridItem({
         <h3 className="mt-2 text-lg font-semibold text-slate-900 dark:text-white">
           {title}
         </h3>
-        <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+        <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
           {description}
         </p>
       </div>

@@ -57,14 +57,18 @@ const quips = [
     id: "yc",
     className: "sm:col-span-2",
     content: (
-      <span className="inline-flex items-center gap-2">
-        <span className="whitespace-nowrap">!Backed by</span>
+      // flex-wrap and a shrinkable logo: at a 200% user font setting the
+      // nowrap label plus the scaled image forced this row to 437px inside a
+      // 311px column, and the page's overflow-hidden silently clipped the
+      // right edge of the whole hero rather than scrolling.
+      <span className="inline-flex flex-wrap items-center gap-2">
+        <span>!Backed by</span>
         <Image
           src="/y-c.png"
           alt="Y Combinator"
           width={132}
           height={38}
-          className="h-6 w-auto object-contain"
+          className="h-6 w-auto max-w-full object-contain"
         />
       </span>
     ),
@@ -85,7 +89,12 @@ export default function LandingPage() {
       <Atmosphere extended />
 
       <section className="relative px-4 pt-16 pb-14 sm:px-6 sm:pt-20 lg:px-10 lg:pt-24">
-        <div className="mx-auto grid w-full max-w-7xl items-start gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:gap-14">
+        {/* min-w-0: grid items default to min-width:auto and refuse to shrink
+            below their content's min-content width. At a 200% user font setting
+            that pushed this column to 437px inside a 311px track, and the
+            page's overflow-hidden clipped the hero rather than scrolling. Same
+            trap as the invoice editor's two-column split. */}
+        <div className="mx-auto grid w-full max-w-7xl items-start gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:gap-14 [&>*]:min-w-0">
           <div>
             <EyebrowBadge icon={<RocketIcon className="h-3.5 w-3.5" />}>
               Invoicey
@@ -185,21 +194,24 @@ export default function LandingPage() {
               </div>
 
               <div className="mt-5 space-y-2 rounded-xl border border-slate-200 bg-slate-100/80 p-4 text-sm dark:border-white/10 dark:bg-white/[0.03]">
-                <div className="flex justify-between text-slate-700 dark:text-slate-200">
+                <div className="flex flex-wrap justify-between gap-x-3 text-slate-700 dark:text-slate-200">
                   <span>Development Sprint</span>
                   <span>₹1,80,000</span>
                 </div>
-                <div className="flex justify-between text-slate-700 dark:text-slate-200">
+                <div className="flex flex-wrap justify-between gap-x-3 text-slate-700 dark:text-slate-200">
                   <span>Support Retainer</span>
                   <span>₹45,000</span>
                 </div>
-                <div className="flex justify-between text-slate-700 dark:text-slate-200">
+                <div className="flex flex-wrap justify-between gap-x-3 text-slate-700 dark:text-slate-200">
                   <span>Taxes + charges</span>
                   <span>₹23,400</span>
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-2 gap-3 text-[11px] text-slate-600 dark:text-slate-300">
+              {/* 12px, not 11px: this is content, not a label. 11px at weight
+                  400 with normal tracking was the smallest text on the page and
+                  sat below the floor the label roles justify for themselves. */}
+              <div className="mt-5 grid grid-cols-2 gap-3 text-xs text-slate-600 dark:text-slate-300">
                 <div className="rounded-lg border border-slate-200 bg-slate-100/80 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
                   Export: PDF / HTML / CSV / JSON
                 </div>

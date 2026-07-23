@@ -730,7 +730,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                         scrolled sideways inside its own card at every desktop
                         size. Retuned to 580px so it fits the column it lives
                         in; the wrapper's scroll is now a genuine last resort. */}
-                    <div className="grid min-w-[556px] grid-cols-[minmax(0,1.6fr)_84px_120px_112px_40px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    <div className="grid min-w-[556px] grid-cols-[minmax(0,1.6fr)_84px_120px_112px_40px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                       <div>Description</div>
                       <div>Qty</div>
                       <div>Unit Price</div>
@@ -784,7 +784,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                             }
                             placeholder="0.00"
                           />
-                          <div className="min-w-0 truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200">
+                          <div className="tabular min-w-0 truncate text-right text-sm font-medium text-slate-700 dark:text-slate-200">
                             {formatCurrency(
                               Math.max(0, item.quantity) * Math.max(0, item.unitPrice),
                               invoice.currency
@@ -869,7 +869,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                         </div>
                         <div className="mt-3 flex items-center justify-between text-sm">
                           <span className="text-slate-500 dark:text-slate-300">Amount</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-100">
+                          <span className="tabular font-semibold text-slate-700 dark:text-slate-100">
                             {formatCurrency(
                               Math.max(0, item.quantity) * Math.max(0, item.unitPrice),
                               invoice.currency
@@ -902,7 +902,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="discount"
-                      className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                      className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                     >
                       Discount
                     </label>
@@ -925,7 +925,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="service-charge"
-                      className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                      className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                     >
                       Service Charge
                     </label>
@@ -948,7 +948,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="cgst"
-                      className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                      className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                     >
                       CGST
                     </label>
@@ -1005,7 +1005,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="sgst"
-                      className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
+                      className="text-xs font-semibold text-slate-600 dark:text-slate-300"
                     >
                       SGST
                     </label>
@@ -1109,7 +1109,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     <MicroLabel variant="onDark">
                       Invoice
                     </MicroLabel>
-                    <p className="mt-1 text-xl font-semibold">
+                    <p className="mt-1 text-xl font-semibold tracking-tight">
                       {invoice.invoiceNumber || "INV-XXXXXX"}
                     </p>
                   </div>
@@ -1173,7 +1173,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 </div>
 
                 <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
-                  <div className="grid grid-cols-[1.5fr_70px_100px] bg-slate-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  <div className="grid grid-cols-[1.5fr_70px_100px] bg-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                     <div>Item</div>
                     <div className="text-right">Qty</div>
                     <div className="text-right">Amount</div>
@@ -1209,7 +1209,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       }
                     >
                       <span>{row.label}</span>
-                      <span>
+                      <span className="tabular">
                         {row.kind === "discount" ? "- " : ""}
                         {formatCurrency(row.amount, invoice.currency)}
                       </span>

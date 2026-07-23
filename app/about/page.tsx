@@ -39,7 +39,7 @@ export default function AboutPage() {
           <h1 className="mt-4 text-4xl font-semibold leading-tight text-slate-900 dark:text-white sm:text-5xl">
             A practical billing workspace for people shipping real work.
           </h1>
-          <p className="mt-4 text-base leading-relaxed text-slate-600 dark:text-slate-300 sm:text-lg">
+          <p className="mt-4 max-w-[68ch] text-base leading-relaxed text-slate-600 dark:text-slate-300 sm:text-lg">
             Invoicey was created for founders, freelancers, and teams who need
             clean invoices without bloated accounting software. The product keeps
             the workflow focused: create, edit, track, and export.

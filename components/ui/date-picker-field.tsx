@@ -1,12 +1,32 @@
 "use client";
 
 import * as React from "react";
-import { format } from "date-fns";
+import dynamic from "next/dynamic";
 import { CalendarIcon } from "@radix-ui/react-icons";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { formatDateLong } from "@/lib/invoices";
 import { cn } from "@/lib/utils";
+
+/**
+ * The calendar grid pulls in react-day-picker and date-fns — the largest
+ * dependency on the editor route after Firebase, ~200 KB decoded — but it only
+ * renders once the user opens the popover, and both invoice dates are
+ * pre-filled with sensible defaults. Loading it on demand takes that weight off
+ * first paint of the page where invoices are actually written.
+ */
+const Calendar = dynamic(
+  () => import("@/components/ui/calendar").then((m) => m.Calendar),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        className="h-[304px] w-[294px] animate-pulse rounded-md bg-slate-100 dark:bg-slate-800"
+        aria-label="Loading calendar"
+      />
+    ),
+  }
+);
 
 interface DatePickerFieldProps {
   value: string;
@@ -74,7 +94,7 @@ export function DatePickerField({
           )}
         >
           <CalendarIcon className="mr-2 h-4 w-4" />
-          {selectedDate ? format(selectedDate, "PPP") : placeholder}
+          {selectedDate ? formatDateLong(selectedDate) : placeholder}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">

@@ -239,7 +239,7 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="break-words text-3xl font-semibold text-slate-900 dark:text-slate-100">
+              <p className="tabular break-words text-3xl font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrency(summary.totalRevenue, summary.currency)}
               </p>
               {summary.otherCurrencyCount > 0 ? (
@@ -258,7 +258,7 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="break-words text-3xl font-semibold text-slate-900 dark:text-slate-100">
+              <p className="tabular break-words text-3xl font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrency(summary.pendingAmount, summary.currency)}
               </p>
               {summary.otherCurrencyCount > 0 ? (
@@ -354,13 +354,13 @@ export default function DashboardPage() {
                             {status}
                           </span>
                         </TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600 dark:text-slate-300">
+                        <TableCell className="tabular whitespace-nowrap text-slate-600 dark:text-slate-300">
                           {formatDateLong(invoice.invoiceDate)}
                         </TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600 dark:text-slate-300">
+                        <TableCell className="tabular whitespace-nowrap text-slate-600 dark:text-slate-300">
                           {formatDateLong(invoice.dueDate)}
                         </TableCell>
-                        <TableCell className="whitespace-nowrap font-medium text-slate-800 dark:text-slate-100">
+                        <TableCell className="tabular whitespace-nowrap font-medium text-slate-800 dark:text-slate-100">
                           {formatCurrency(invoice.total, invoice.currency)}
                         </TableCell>
                         <TableCell>

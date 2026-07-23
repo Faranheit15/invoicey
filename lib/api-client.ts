@@ -1,4 +1,4 @@
-import { auth } from "@/lib/firebase";
+import { loadFirebaseAuth } from "@/lib/firebase-lazy";
 import { requiresEmailVerification } from "@/lib/auth-client";
 import type { User } from "firebase/auth";
 import type { InvoiceRecord, InvoicePayload } from "@/lib/invoices";
@@ -101,6 +101,7 @@ export const describeRequestError = (
  * waits for that restoration to finish first.
  */
 const getReadyUser = async (): Promise<User> => {
+  const { auth } = await loadFirebaseAuth();
   await auth.authStateReady();
   const user = auth.currentUser;
   if (!user) {

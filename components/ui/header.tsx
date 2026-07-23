@@ -4,9 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { signOut, onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
 import { requiresEmailVerification } from "@/lib/auth-client";
+import { loadFirebaseAuth } from "@/lib/firebase-lazy";
 import {
   DEFAULT_USER_AVATAR,
   normalizeAvatarUrl,
@@ -51,47 +50,71 @@ export default function Header() {
   const [theme, setTheme] = useState<Theme>("light");
   const router = useRouter();
 
+  /**
+   * Firebase Auth is loaded here rather than imported at module scope.
+   *
+   * This header lives in the root layout, so a static import put the whole
+   * Auth SDK — 145 KB decoded, 43 KB over the wire — into the initial bundle of
+   * *every* route, including four static marketing pages that never touch auth.
+   * Importing it inside the effect moves it to a separate chunk fetched after
+   * paint.
+   *
+   * No behavioural change: the header already rendered `user = null` until
+   * onAuthStateChanged fired, so the signed-out shell was always the first
+   * frame. This only shifts when the SDK arrives, not what is shown.
+   */
   useEffect(() => {
     const userSessionManager = new UserSessionManager();
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
 
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
-        if (requiresEmailVerification(firebaseUser)) {
+    (async () => {
+      const { onAuthStateChanged, auth } = await loadFirebaseAuth();
+      // The component may have unmounted while the chunk was in flight.
+      if (cancelled) return;
+
+      unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+        if (firebaseUser) {
+          if (requiresEmailVerification(firebaseUser)) {
+            userSessionManager.clearLocal();
+            setUser(null);
+            return;
+          }
+
+          const storedUser = userSessionManager.user;
+          if (storedUser) {
+            setUser(storedUser);
+            return;
+          }
+
+          const normalizedUser: UserData = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            name: firebaseUser.displayName || "User",
+            photoURL: normalizeAvatarUrl(firebaseUser.photoURL || fallbackAvatar),
+            providerIds: Array.from(
+              new Set(
+                firebaseUser.providerData
+                  .map((provider) => provider.providerId)
+                  .map((providerId) => sanitizeProviderId(providerId))
+                  .filter((providerId): providerId is string => Boolean(providerId))
+              )
+            ),
+          };
+
+          userSessionManager.user = normalizedUser;
+          setUser(normalizedUser);
+        } else {
           userSessionManager.clearLocal();
           setUser(null);
-          return;
         }
+      });
+    })();
 
-        const storedUser = userSessionManager.user;
-        if (storedUser) {
-          setUser(storedUser);
-          return;
-        }
-
-        const normalizedUser: UserData = {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || "",
-          name: firebaseUser.displayName || "User",
-          photoURL: normalizeAvatarUrl(firebaseUser.photoURL || fallbackAvatar),
-          providerIds: Array.from(
-            new Set(
-              firebaseUser.providerData
-                .map((provider) => provider.providerId)
-                .map((providerId) => sanitizeProviderId(providerId))
-                .filter((providerId): providerId is string => Boolean(providerId))
-            )
-          ),
-        };
-
-        userSessionManager.user = normalizedUser;
-        setUser(normalizedUser);
-      } else {
-        userSessionManager.clearLocal();
-        setUser(null);
-      }
-    });
-
-    return () => unsubscribe();
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -102,6 +125,9 @@ export default function Header() {
 
   const logout = async () => {
     const userSessionManager = new UserSessionManager();
+    // Already fetched by the effect above by the time this button can be
+    // clicked; the import resolves from cache.
+    const { signOut, auth } = await loadFirebaseAuth();
     await signOut(auth);
     userSessionManager.clearLocal();
     setUser(null);
@@ -117,16 +143,16 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-700 dark:bg-slate-950/85">
-      <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-10">
-        <Link href="/" className="inline-flex items-center gap-2">
+      <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-10">
+        <Link href="/" className="inline-flex min-w-0 items-center gap-2">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900">
             <RocketIcon className="w-4 h-4" />
           </span>
-          <div>
-            <p className="text-base font-semibold text-slate-900 dark:text-slate-100">
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
               Invoicey
             </p>
-            <MicroLabel variant="meta">
+            <MicroLabel variant="meta" className="truncate">
               Billing OS
             </MicroLabel>
           </div>
@@ -149,7 +175,7 @@ export default function Header() {
           ) : null}
         </nav>
 
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden shrink-0 items-center gap-3 md:flex">
           <Button
             variant="outline"
             size="icon"
@@ -193,7 +219,7 @@ export default function Header() {
           )}
         </div>
 
-        <div className="flex items-center gap-1 md:hidden">
+        <div className="flex shrink-0 items-center gap-1 md:hidden">
           <Button
             variant="ghost"
             size="icon"

@@ -132,7 +132,7 @@ export function InvoiceCardList({
                 <p className="truncate text-base font-medium text-slate-800 dark:text-slate-100">
                   {invoice.billTo || "No client name"}
                 </p>
-                <p className="mt-0.5 truncate text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">
+                <p className="mt-0.5 truncate text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                   {invoice.invoiceNumber}
                 </p>
               </div>
@@ -144,10 +144,10 @@ export function InvoiceCardList({
             </div>
 
             <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+              <p className="tabular text-xl font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrency(invoice.total, invoice.currency)}
               </p>
-              <p className="text-xs text-slate-600 dark:text-slate-400">
+              <p className="tabular text-xs text-slate-600 dark:text-slate-400">
                 Due {formatDateLong(invoice.dueDate)}
               </p>
             </div>

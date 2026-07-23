@@ -60,8 +60,28 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased transition-colors duration-200;
-    font-family: var(--font-geist-sans), "Segoe UI", sans-serif;
+    /*
+     * font-sans is the Helvetica stack from tailwind.config.js. It replaces
+     * `var(--font-geist-sans), "Segoe UI", sans-serif`, where the variable was
+     * never defined anywhere in the project — and because an undefined var()
+     * with no fallback is invalid at computed-value time, the browser discarded
+     * the *whole* declaration rather than falling through to Segoe UI. The type
+     * you saw was Tailwind's preflight default, inherited from <html>, which
+     * nobody chose.
+     */
+    @apply bg-background font-sans text-foreground antialiased transition-colors duration-200;
+  }
+
+  /*
+   * Figures that stack or get compared must line up: the Amount column, the
+   * totals ladder, the dashboard's Total column, every date. Helvetica and
+   * Arial already ship uniform-width digits, so this mostly guards the fallback
+   * faces — but it is the difference between an invoice that reads as a ledger
+   * and one that reads as prose with numbers in it.
+   */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
   }
 }
 

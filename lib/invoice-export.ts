@@ -98,7 +98,9 @@ export const createInvoiceHtml = (
       body {
         margin: 0;
         padding: 24px;
-        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        /* Same Helvetica stack as the app, so the document the client
+           receives is set in the same face the user composed it in. */
+        font-family: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif;
         color: #111827;
         background: #f3f4f6;
       }
@@ -253,6 +255,14 @@ export const createInvoiceHtml = (
       .summary .amount {
         text-align: right;
         font-weight: 600;
+      }
+
+      /* Every figure that stacks: line-item columns and the totals ladder. */
+      .summary td,
+      tbody td:nth-child(n + 3),
+      thead th:nth-child(n + 3) {
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum";
       }
 
       .summary .grand td {

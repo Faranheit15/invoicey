@@ -14,6 +14,23 @@ module.exports = {
   ],
   theme: {
   	extend: {
+  		fontFamily: {
+  			// Helvetica, delivered the only way Helvetica can be: as a stack, not
+  			// a download. The face is licensed and not webfont-distributable, so
+  			// this asks for it where it exists and falls back to metric-compatible
+  			// substitutes elsewhere — Arial matches Helvetica's advance widths
+  			// glyph for glyph, and Liberation Sans matches Arial. The result is
+  			// zero font bytes, no FOUT, and no reflow between platforms.
+  			sans: [
+  				'"Helvetica Neue"',
+  				'Helvetica',
+  				'Arial',
+  				'"Liberation Sans"',
+  				'sans-serif',
+  				'"Apple Color Emoji"',
+  				'"Segoe UI Emoji"'
+  			]
+  		},
   		letterSpacing: {
   			// The tracking of the system's signature uppercase micro-label.
   			// Replaces the arbitrary tracking-[0.18em] and tracking-[0.2em] that

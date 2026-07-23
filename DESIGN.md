@@ -28,38 +28,79 @@ colors:
   status-paid: "#047857"
   status-overdue: "#BE123C"
   document-ink: "#111827"
+  document-muted: "#4b5563"
   document-rule: "#E5E7EB"
   document-desk: "#F3F4F6"
 typography:
   display:
-    fontFamily: "ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
     fontSize: "clamp(2.25rem, 5vw, 3.75rem)"
     fontWeight: 600
     lineHeight: 1.05
     letterSpacing: "normal"
   headline:
-    fontFamily: "ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
     fontSize: "1.875rem"
     fontWeight: 600
     lineHeight: 1.2
   title:
-    fontFamily: "ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
     fontSize: "1.25rem"
     fontWeight: 600
     lineHeight: 1.1
     letterSpacing: "-0.015em"
   body:
-    fontFamily: "ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.625
   label:
-    fontFamily: "ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
     fontSize: "0.6875rem"
     fontWeight: 600
     lineHeight: 1.2
     letterSpacing: "0.18em"
+  field-label:
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: "normal"
+  section-label:
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: "0.05em"
+  document-masthead:
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: "28px"
+    fontWeight: 400
+    letterSpacing: "0.04em"
+  document-total:
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: "15px"
+    fontWeight: 700
+  document-value:
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: "14px"
+    fontWeight: 600
+  document-body:
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: "13px"
+    fontWeight: 400
+  document-label:
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    letterSpacing: "0.06em"
+  document-caption:
+    fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif"
+    fontSize: "11px"
+    fontWeight: 400
+    letterSpacing: "0.05em"
 rounded:
+  document-sheet: "14px"
   sm: "8px"
   md: "10px"
   lg: "12px"
@@ -143,7 +184,7 @@ Three registers exist, and they were built independently rather than derived fro
 - Every dark variant hand-written; no automatic theming
 - Uppercase, wide-tracked micro-labels as the recurring accent of the type system
 - Rounded but not soft: 8–16px corners, full pills only for status
-- No webfont; the system font stack is the type system
+- Helvetica by stack, not by download: zero font bytes, metric-compatible fallbacks
 - Two surface registers, acknowledged as unreconciled
 
 ## Colors
@@ -186,26 +227,30 @@ Status color is the only place color is allowed to mean something:
 
 ## Typography
 
-**Display Font:** none loaded — Tailwind's preflight system stack
-**Body Font:** `ui-sans-serif, system-ui, sans-serif` (verified in-browser)
-**Document Font:** `"Segoe UI", "Helvetica Neue", Arial, sans-serif` (the exported invoice)
+**Family:** `"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif` — one family, every register including the exported document.
 
-**Character:** Neutral and workmanlike by default, with all of the system's typographic personality concentrated in one device: the uppercase, wide-tracked micro-label. That label is the thread that runs through every register — the marketing eyebrow at `0.18em`, the table header at `0.05em`, the document's field labels at `0.06em`.
+**Delivery: a stack, not a download.** Helvetica is licensed and cannot be distributed as a webfont, so the system asks for it where it exists (macOS, iOS) and falls back to substitutes that match its metrics glyph for glyph: Arial on Windows, Liberation Sans on Linux. Advance widths are identical across all three, so line breaks and measure do not move between platforms. The cost is **zero font bytes, no FOUT, no layout shift, and no preload budget** — which is the right trade for a tool whose job is to be fast and get out of the way.
 
-**A defect worth stating plainly:** [globals.css:64](app/globals.css:64) sets `font-family: var(--font-geist-sans), "Segoe UI", sans-serif`, but `--font-geist-sans` is never defined — there is no `next/font` import anywhere in the project. Because an undefined `var()` with no fallback is *invalid at computed-value time*, the browser discards the **entire declaration**, not just the missing family. The authored `"Segoe UI", sans-serif` fallback is therefore unreachable dead code, and `body` simply inherits Tailwind preflight's `ui-sans-serif, system-ui, sans-serif` from `html`.
+Do not add `next/font` or a webfont to "fix" this; the absence of a download is the decision. This replaced a dead `var(--font-geist-sans), "Segoe UI", sans-serif` declaration whose variable was never defined — and because an undefined `var()` with no fallback is invalid at computed-value time, the browser discarded the *whole* rule, so the app rendered in Tailwind's preflight default that nobody had chosen.
 
-The practical result is benign — that stack resolves to Segoe UI Variable on Windows and SF on macOS, which is a reasonable system pairing — but it is **not the font anyone chose**, and the intended Geist never loads. Fix it once in `app/layout.tsx` or delete the dead declaration; do not treat the current rendering as a decision.
+**Character:** Neutral, tightly-fitted grotesque. Helvetica's closed apertures and uniform stroke keep dense tabular data quiet, and its uniform-width digits make money columns line up before `tabular-nums` is even asked for. All of the system's typographic personality is concentrated in one device: the uppercase, wide-tracked micro-label — the marketing eyebrow at `0.18em`, section labels at `0.05em`, the document's field labels at `0.06em`.
 
 ### Hierarchy
 - **Display** (600, `2.25rem → 3rem → 3.75rem` across sm/lg, line-height `1.05`): Landing hero only. Paired with `text-balance`.
 - **Headline** (600, `2.25rem → 3rem`, line-height tight): Page titles on About and Pricing. The dashboard runs one step smaller at `1.875rem`.
 - **Title** (600, `1.25rem`, `tracking-tight`): Card titles. The `Card` primitive defaults to `1.5rem` but is overridden downward almost everywhere it is used — treat `1.25rem` as the real value and the primitive's default as unused.
 - **Body** (400, `0.875rem`, line-height `1.625`): App copy, table cells, form help. Marketing copy steps up to `1rem → 1.125rem` with `text-pretty` and a `max-w-2xl` measure.
-- **Label** (600, `0.6875rem`, `0.18em`, uppercase): Eyebrow pills, section kickers. In-app variants drop to `0.75rem` at `0.025em` for table headers.
+- **Label** (600, `0.75rem`, `0.05em`, uppercase): Section headings and table headers — the dominant label role. Rendered by `MicroLabel variant="section"`.
+- **Field label** (600, `0.75rem`, no tracking, sentence case): Names a control. **Case, not tracking, is what separates it from the section label above it** — the two were once distinguished by 0.025em alone, which is not a difference anyone can see.
+- **Eyebrow** (600, `0.6875rem`, `tracking-eyebrow` = `0.18em`, uppercase): Marketing kicker pills and metadata. `MicroLabel variant="meta"` and `EyebrowBadge`.
+
+**The exported document runs its own ramp** ([lib/invoice-export.ts](lib/invoice-export.ts)), in px because it is a self-contained print stylesheet with no access to the app's tokens: `28px` masthead, `15px` grand total, `14px` metadata values, `13px` body and line items, `12px` field labels, `11px` table headers and footer. These are deliberate and should be read as a fifth documented step set, not as drift.
 
 ### Named Rules
 
 **The Uppercase-Label Rule.** Small text earns legibility from letterspacing, not weight or color. Any label below `0.75rem` is uppercase with tracking of at least `0.05em` and set in `{colors.muted-foreground}`. This is the most consistent single behavior across all three registers. Reach for `MicroLabel` rather than re-typing the classes; `tracking-eyebrow` (`0.18em`) is the one arbitrary tracking value the system keeps, and it is a theme token, not a bracket literal.
+
+**The Tabular-Figures Rule.** Any figure that stacks or gets compared — the Amount column, the totals ladder, the dashboard's Total column, every date — carries `.tabular` (`font-variant-numeric: tabular-nums`). Helvetica and Arial already ship uniform-width digits, so on the primary platforms this changes nothing visible; it exists so the alignment survives a fallback face. Prose figures do not need it.
 
 **The Numbers-Are-Semibold Rule.** Every money figure — dashboard stat, table amount, preview total, document grand total — is weight 600 or 700 against 400 body text. Amounts are never the same weight as the label describing them.
 

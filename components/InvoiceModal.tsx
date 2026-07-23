@@ -292,13 +292,13 @@ export default function InvoiceModal({
                     >
                       <div className="text-slate-500 dark:text-slate-300">{index + 1}</div>
                       <div className="text-slate-800 dark:text-slate-100">{item.name}</div>
-                      <div className="text-right text-slate-600 dark:text-slate-300">
+                      <div className="tabular text-right text-slate-600 dark:text-slate-300">
                         {item.quantity}
                       </div>
-                      <div className="text-right font-medium text-slate-700 dark:text-slate-200">
+                      <div className="tabular text-right font-medium text-slate-700 dark:text-slate-200">
                         {formatCurrency(item.price, currency)}
                       </div>
-                      <div className="text-right font-semibold text-slate-900 dark:text-slate-100">
+                      <div className="tabular text-right font-semibold text-slate-900 dark:text-slate-100">
                         {formatCurrency(item.price * item.quantity, currency)}
                       </div>
                     </div>
@@ -308,7 +308,9 @@ export default function InvoiceModal({
             </section>
 
             <section className="flex justify-end px-6 pb-6 sm:px-8">
-              <div className="w-full max-w-sm text-sm">
+              {/* The one place every figure in the invoice is compared against
+                  its neighbours, so the whole ladder gets tabular figures. */}
+              <div className="tabular w-full max-w-sm text-sm">
                 <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
                   <span>Subtotal</span>
                   <span>{formatCurrency(subtotal, currency)}</span>
