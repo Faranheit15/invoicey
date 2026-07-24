@@ -24,9 +24,9 @@ import {
   Cross1Icon,
   HamburgerMenuIcon,
   MoonIcon,
-  RocketIcon,
   SunIcon,
 } from "@radix-ui/react-icons";
+import { InvoiceyMark } from "@/components/ui/invoicey-mark";
 
 interface UserData {
   uid: string;
@@ -146,9 +146,7 @@ export default function Header() {
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/85 backdrop-blur-md dark:border-slate-700 dark:bg-slate-950/85">
       <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-10">
         <Link href="/" className="inline-flex min-w-0 items-center gap-2">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900">
-            <RocketIcon className="w-4 h-4" />
-          </span>
+          <InvoiceyMark className="h-8 w-8 shrink-0" />
           <div className="min-w-0">
             <p className="truncate text-base font-semibold text-slate-900 dark:text-slate-100">
               Invoicey

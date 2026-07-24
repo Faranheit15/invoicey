@@ -10,6 +10,12 @@ import { THEME_INIT_SCRIPT } from "@/lib/theme";
 export const metadata: Metadata = {
   title: "Invoicey",
   description: "Create invoices fast and easily",
+  // favicon.svg adapts to the OS light/dark preference on its own; icon.svg is
+  // the fixed-navy variant used as the Apple touch icon.
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 // viewport-fit=cover lets the page reach the physical screen edges on notched
