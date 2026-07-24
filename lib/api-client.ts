@@ -3,6 +3,7 @@ import { requiresEmailVerification } from "@/lib/auth-client";
 import type { User } from "firebase/auth";
 import type { InvoiceRecord, InvoicePayload } from "@/lib/invoices";
 import type { ClientEventInput } from "@/lib/logs";
+import type { FeedbackInput, FeedbackRecord } from "@/lib/feedback";
 import type {
   AdminMe,
   AdminOverview,
@@ -12,6 +13,7 @@ import type {
   AdminActivityResponse,
   AdminLogsResponse,
   AdminActionResponse,
+  AdminFeedbackResponse,
 } from "@/lib/admin-types";
 
 /**
@@ -312,6 +314,22 @@ export const adminApi = {
     authedFetchBlob(`/api/admin/export/users${buildQuery({ format })}`),
   exportInvoices: (format: "csv" | "json") =>
     authedFetchBlob(`/api/admin/export/invoices${buildQuery({ format })}`),
+  feedback: (params: QueryParams = {}) =>
+    authedFetch<AdminFeedbackResponse>(`/api/admin/feedback${buildQuery(params)}`),
+  feedbackAction: (id: string, status: string) =>
+    authedFetch<AdminActionResponse>(
+      `/api/admin/feedback/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify({ status }) }
+    ),
+};
+
+export const feedbackApi = {
+  submit: (input: FeedbackInput) =>
+    authedFetch<{ message: string; feedback: FeedbackRecord }>("/api/feedback", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  listOwn: () => authedFetch<{ feedback: FeedbackRecord[] }>("/api/feedback"),
 };
 
 /**

@@ -10,6 +10,7 @@ import {
   FileTextIcon,
   ActivityLogIcon,
   ReaderIcon,
+  ChatBubbleIcon,
   HamburgerMenuIcon,
   Cross1Icon,
   ArrowLeftIcon,
@@ -28,6 +29,7 @@ const NAV = [
   { href: "/admin", label: "Overview", icon: DashboardIcon, exact: true },
   { href: "/admin/users", label: "Users", icon: PersonIcon },
   { href: "/admin/invoices", label: "Invoices", icon: FileTextIcon },
+  { href: "/admin/feedback", label: "Feedback", icon: ChatBubbleIcon },
   { href: "/admin/activity", label: "Activity", icon: ActivityLogIcon },
   { href: "/admin/logs", label: "Logs", icon: ReaderIcon },
 ] as const;

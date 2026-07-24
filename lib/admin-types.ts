@@ -4,6 +4,7 @@
  */
 import type { InvoiceRecord } from "@/lib/invoices";
 import type { LogEntry } from "@/lib/logs";
+import type { FeedbackRecord } from "@/lib/feedback";
 
 export type UserRole = "user" | "admin";
 export type UserStatus = "active" | "suspended";
@@ -115,4 +116,18 @@ export interface AdminActionResponse {
   message: string;
   user?: AdminUserRow;
   invoice?: AdminInvoiceRow;
+}
+
+/** A feedback row in the admin triage table, with submitter identity attached. */
+export interface AdminFeedbackRow extends FeedbackRecord {
+  userEmail?: string;
+  userName?: string;
+}
+
+export interface AdminFeedbackResponse {
+  feedback: AdminFeedbackRow[];
+  page: number;
+  limit: number;
+  total: number;
+  counts: { new: number; reviewed: number; archived: number; total: number };
 }

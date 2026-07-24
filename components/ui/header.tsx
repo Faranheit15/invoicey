@@ -174,6 +174,11 @@ export default function Header() {
               Dashboard
             </Link>
           ) : null}
+          {user ? (
+            <Link href="/feedback" className="hover:text-slate-900 dark:hover:text-white">
+              Feedback
+            </Link>
+          ) : null}
           {user?.role === "admin" ? (
             <Link href="/admin" className="hover:text-slate-900 dark:hover:text-white">
               Admin
@@ -281,6 +286,13 @@ export default function Header() {
                   className="rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   Dashboard
+                </Link>
+                <Link
+                  href="/feedback"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Feedback
                 </Link>
                 {user?.role === "admin" ? (
                   <Link
