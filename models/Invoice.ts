@@ -31,7 +31,20 @@ export interface IInvoice extends Document {
 }
 
 const InvoiceSchema: Schema = new Schema({
-  userId: { type: String, required: true },
+  // Tenant owner. The non-empty validator stops any future write from creating
+  // an orphan (tenant-less) row. NOTE: true isolation is still application-
+  // enforced by the `{ _id, userId }` query filters in the route — this only
+  // prevents *new* orphans; legacy orphans are handled by the audit script.
+  userId: {
+    type: String,
+    required: true,
+    trim: true,
+    validate: {
+      validator: (value: string) =>
+        typeof value === "string" && value.trim().length > 0,
+      message: "userId must be a non-empty string",
+    },
+  },
   companyName: { type: String, required: true },
   companyEmail: { type: String, default: "" },
   companyPhone: { type: String, default: "" },
@@ -75,6 +88,12 @@ const InvoiceSchema: Schema = new Schema({
 // Prod note: on an existing collection, build this in the background (off-hours)
 // so a foreground build does not lock the collection.
 InvoiceSchema.index({ userId: 1, is_deleted: 1, createdAt: -1 });
+
+// Admin cross-user scans. The compound index above leads with userId and cannot
+// serve tenant-wide queries, so the admin surface needs its own. Build these in
+// the background off-hours on an existing collection (see note above).
+InvoiceSchema.index({ is_deleted: 1, createdAt: -1 }); // global recent list + invoices-over-time
+InvoiceSchema.index({ is_deleted: 1, status: 1, currency: 1 }); // status breakdown + revenue-by-currency
 
 export default mongoose.models.Invoice ||
   mongoose.model<IInvoice>("Invoice", InvoiceSchema);

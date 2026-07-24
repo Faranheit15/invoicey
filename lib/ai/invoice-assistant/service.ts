@@ -2,6 +2,7 @@ import type {
   AssistantConversationEntry,
   InvoiceAssistantRequest,
   InvoiceAssistantResponse,
+  InvoiceAssistantTelemetry,
 } from "@/lib/ai/invoice-assistant/contracts";
 import { generateInvoiceAssistantCompletion } from "@/lib/ai/invoice-assistant/provider";
 import {
@@ -46,10 +47,16 @@ export const validateAssistantRequest = (value: unknown): InvoiceAssistantReques
   };
 };
 
+export interface InvoiceAssistantResult {
+  response: InvoiceAssistantResponse;
+  telemetry: InvoiceAssistantTelemetry;
+}
+
 export const generateInvoiceAssistantResponse = async (
   request: InvoiceAssistantRequest
-): Promise<InvoiceAssistantResponse> => {
+): Promise<InvoiceAssistantResult> => {
   const completion = await generateInvoiceAssistantCompletion(request);
   const rawPayload = parseAssistantJsonPayload(completion.text);
-  return normalizeAssistantResponse(rawPayload);
+  const response = normalizeAssistantResponse(rawPayload);
+  return { response, telemetry: completion.telemetry };
 };

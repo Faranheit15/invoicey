@@ -2,6 +2,17 @@ import { loadFirebaseAuth } from "@/lib/firebase-lazy";
 import { requiresEmailVerification } from "@/lib/auth-client";
 import type { User } from "firebase/auth";
 import type { InvoiceRecord, InvoicePayload } from "@/lib/invoices";
+import type { ClientEventInput } from "@/lib/logs";
+import type {
+  AdminMe,
+  AdminOverview,
+  AdminUsersResponse,
+  AdminUserDetail,
+  AdminInvoicesResponse,
+  AdminActivityResponse,
+  AdminLogsResponse,
+  AdminActionResponse,
+} from "@/lib/admin-types";
 
 /**
  * A non-OK API response. `status` is the HTTP status; `message` is the server's
@@ -205,4 +216,127 @@ export const aiApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+};
+
+/** Build a query string, dropping empty/undefined values. */
+export type QueryParams = Record<string, string | number | boolean | undefined | null>;
+
+export const buildQuery = (params: QueryParams = {}): string => {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    search.set(key, String(value));
+  }
+  const qs = search.toString();
+  return qs ? `?${qs}` : "";
+};
+
+/**
+ * A file-returning authed request (admin exports). Same auth/timeout/error
+ * handling as authedFetch, but resolves the response body as a Blob and reads
+ * the download filename from Content-Disposition.
+ */
+export const authedFetchBlob = async (
+  path: string
+): Promise<{ blob: Blob; filename: string }> => {
+  const token = await getAuthToken();
+
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new NetworkError("timeout");
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      throw new NetworkError("offline");
+    }
+    throw new NetworkError("unreachable");
+  }
+
+  if (!response.ok) {
+    const data = (await response.json().catch(() => null)) as unknown;
+    const message =
+      data &&
+      typeof data === "object" &&
+      "error" in data &&
+      typeof (data as { error?: unknown }).error === "string"
+        ? (data as { error: string }).error
+        : statusFallbackMessage(response.status);
+    throw new ApiError(message, response.status);
+  }
+
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const filename = match?.[1] || "export";
+  const blob = await response.blob();
+  return { blob, filename };
+};
+
+export type UserAction = "promote" | "revoke" | "suspend" | "unsuspend";
+
+export const adminApi = {
+  me: () => authedFetch<AdminMe>("/api/admin/me"),
+  overview: () => authedFetch<AdminOverview>("/api/admin/overview"),
+  users: (params: QueryParams = {}) =>
+    authedFetch<AdminUsersResponse>(`/api/admin/users${buildQuery(params)}`),
+  user: (uid: string, params: QueryParams = {}) =>
+    authedFetch<AdminUserDetail>(
+      `/api/admin/users/${encodeURIComponent(uid)}${buildQuery(params)}`
+    ),
+  invoices: (params: QueryParams = {}) =>
+    authedFetch<AdminInvoicesResponse>(`/api/admin/invoices${buildQuery(params)}`),
+  activity: (params: QueryParams = {}) =>
+    authedFetch<AdminActivityResponse>(`/api/admin/activity${buildQuery(params)}`),
+  logs: (params: QueryParams = {}) =>
+    authedFetch<AdminLogsResponse>(`/api/admin/logs${buildQuery(params)}`),
+  userAction: (uid: string, action: UserAction) =>
+    authedFetch<AdminActionResponse>(
+      `/api/admin/users/${encodeURIComponent(uid)}`,
+      { method: "PATCH", body: JSON.stringify({ action }) }
+    ),
+  invoiceAction: (
+    id: string,
+    body: { action?: "soft_delete" | "restore"; status?: string }
+  ) =>
+    authedFetch<AdminActionResponse>(
+      `/api/admin/invoices/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(body) }
+    ),
+  exportUsers: (format: "csv" | "json") =>
+    authedFetchBlob(`/api/admin/export/users${buildQuery({ format })}`),
+  exportInvoices: (format: "csv" | "json") =>
+    authedFetchBlob(`/api/admin/export/invoices${buildQuery({ format })}`),
+};
+
+/**
+ * Fire-and-forget client telemetry beacon. Never throws, never blocks the UI —
+ * failures (offline, signed-out, server down) are swallowed. `keepalive` lets it
+ * survive a navigation/unload while still carrying the Firebase bearer header
+ * (navigator.sendBeacon cannot set headers).
+ */
+export const eventsApi = {
+  emit: (input: ClientEventInput): void => {
+    void (async () => {
+      try {
+        const token = await getAuthToken();
+        await fetch("/api/events", {
+          method: "POST",
+          keepalive: true,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(input),
+        });
+      } catch {
+        // best-effort telemetry: swallow everything.
+      }
+    })();
+  },
 };

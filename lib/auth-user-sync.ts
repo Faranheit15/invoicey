@@ -2,6 +2,14 @@ import type { DecodedIdToken } from "firebase-admin/auth";
 import User from "@/models/User";
 import Invoice from "@/models/Invoice";
 import { normalizeAvatarUrl, sanitizeProviderId } from "@/lib/user-profile";
+import { recordActivity } from "@/lib/server/log";
+
+/** Emails allowed to bootstrap as admin, from ADMIN_EMAILS (comma-separated). */
+const getAdminEmailAllowlist = (): string[] =>
+  (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
 
 interface SyncUserInput {
   decodedToken: DecodedIdToken;
@@ -82,6 +90,15 @@ export const syncUserWithMongo = async ({
   // account (and the unique email index makes a duplicate create fail closed).
   const emailVerified = decodedToken.email_verified === true;
 
+  // Bootstrap admins from the env allowlist, but ONLY when Firebase has verified
+  // the token's email — the same trust boundary that prevents the email-based
+  // account takeover below. This promotes only; role/status are never otherwise
+  // written on login (kept out of updatePayload), so a normal sign-in can neither
+  // wipe a panel-granted admin nor un-suspend a suspended user.
+  const isBootstrapAdmin =
+    emailVerified && getAdminEmailAllowlist().includes(email);
+  const rolePatch = isBootstrapAdmin ? { role: "admin" as const } : {};
+
   const existingUser = (await User.findOne(
     emailVerified ? { $or: [{ uid }, { email }] } : { uid }
   )) as UserRecord | null;
@@ -139,13 +156,16 @@ export const syncUserWithMongo = async ({
         return User.findByIdAndUpdate(
           existingUser._id,
           {
-            $set: updatePayload,
+            $set: { ...updatePayload, ...rolePatch },
             $unset: { providerId: "" },
           },
           { new: true }
         );
       })()
-    : await User.create(updatePayload);
+    : await User.create({ ...updatePayload, ...rolePatch });
+
+  // Fire-and-forget login activity; never blocks or fails the sign-in.
+  recordActivity({ userId: uid, type: "login", meta: { providerId } });
 
   return {
     user,

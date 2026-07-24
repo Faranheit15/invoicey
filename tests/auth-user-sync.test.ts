@@ -30,6 +30,13 @@ const fakeInvoice = {
 
 mock.module("@/models/User", () => ({ default: fakeUser }));
 mock.module("@/models/Invoice", () => ({ default: fakeInvoice }));
+// The sync records a login activity via the real writer. Neutralize its DB deps
+// so it stays harmless — do NOT mock @/lib/server/log itself, since Bun's global
+// module mocks would leak an incomplete stub into the other suites.
+mock.module("@/lib/mongodb", () => ({ default: async () => {} }));
+mock.module("@/models/LogEntry", () => ({
+  default: { create: async () => ({}) },
+}));
 
 const { syncUserWithMongo } = await import("@/lib/auth-user-sync");
 

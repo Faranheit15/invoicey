@@ -41,6 +41,7 @@ interface SessionUser {
   name?: string;
   avatar?: string;
   providerIds?: string[];
+  role?: string;
 }
 
 interface SessionResponse {
@@ -216,6 +217,7 @@ export default function AuthPage() {
         Array.isArray(data.user?.providerIds) && data.user.providerIds.length > 0
           ? data.user.providerIds
           : providerIds,
+      role: data.user?.role === "admin" ? "admin" : "user",
     };
   };
 

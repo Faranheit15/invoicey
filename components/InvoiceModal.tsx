@@ -13,6 +13,8 @@ import {
   createInvoiceCsv,
   createInvoiceHtml,
 } from "@/lib/invoice-export";
+import { downloadBlob } from "@/lib/download";
+import { eventsApi } from "@/lib/api-client";
 import {
   InvoiceRecord,
   formatCurrency,
@@ -33,18 +35,6 @@ interface InvoiceModalProps {
   onDelete?: (invoiceId: string) => Promise<void> | void;
   isMutating?: boolean;
 }
-
-const downloadBlob = (filename: string, content: string, type: string) => {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
 
 export default function InvoiceModal({
   invoice,
@@ -73,6 +63,11 @@ export default function InvoiceModal({
     setLogoLoadFailed(false);
   }, [invoice.companyLogo]);
 
+  // Best-effort view telemetry for the admin activity/log surface.
+  useEffect(() => {
+    eventsApi.emit({ event: "invoice.viewed", meta: { invoiceId: invoice._id } });
+  }, [invoice._id]);
+
   const exportPdf = () => {
     setExportError("");
     const html = createInvoiceHtml(invoice, { autoPrint: true });
@@ -94,6 +89,10 @@ export default function InvoiceModal({
       once: true,
     });
     setTimeout(revokeObjectUrl, 60_000);
+    eventsApi.emit({
+      event: "report.generated",
+      meta: { format: "pdf", invoiceId: invoice._id },
+    });
   };
 
   const exportHtml = () => {
@@ -102,6 +101,10 @@ export default function InvoiceModal({
       createInvoiceHtml(invoice),
       "text/html;charset=utf-8"
     );
+    eventsApi.emit({
+      event: "report.generated",
+      meta: { format: "html", invoiceId: invoice._id },
+    });
   };
 
   const exportCsv = () => {
@@ -110,6 +113,10 @@ export default function InvoiceModal({
       createInvoiceCsv(invoice),
       "text/csv;charset=utf-8"
     );
+    eventsApi.emit({
+      event: "report.generated",
+      meta: { format: "csv", invoiceId: invoice._id },
+    });
   };
 
   const exportJson = () => {
@@ -118,6 +125,10 @@ export default function InvoiceModal({
       JSON.stringify(invoice, null, 2),
       "application/json;charset=utf-8"
     );
+    eventsApi.emit({
+      event: "report.generated",
+      meta: { format: "json", invoiceId: invoice._id },
+    });
   };
 
   return (

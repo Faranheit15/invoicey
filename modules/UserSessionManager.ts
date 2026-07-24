@@ -9,6 +9,7 @@ interface UserData {
   name: string;
   photoURL: string;
   providerIds: string[];
+  role?: "user" | "admin";
 }
 
 interface LegacyUserData extends Omit<UserData, "providerIds"> {
@@ -107,6 +108,7 @@ export default class UserSessionManager {
       name: value.name,
       photoURL: normalizeAvatarUrl(value.photoURL),
       providerIds: Array.from(new Set(providerIds)),
+      role: (value as UserData).role,
     };
   }
   set user(value: UserData | null) {

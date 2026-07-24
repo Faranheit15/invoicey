@@ -34,6 +34,7 @@ interface UserData {
   name: string;
   photoURL: string;
   providerIds: string[];
+  role?: "user" | "admin";
 }
 
 const fallbackAvatar = DEFAULT_USER_AVATAR;
@@ -173,6 +174,11 @@ export default function Header() {
               Dashboard
             </Link>
           ) : null}
+          {user?.role === "admin" ? (
+            <Link href="/admin" className="hover:text-slate-900 dark:hover:text-white">
+              Admin
+            </Link>
+          ) : null}
         </nav>
 
         <div className="hidden shrink-0 items-center gap-3 md:flex">
@@ -276,6 +282,15 @@ export default function Header() {
                 >
                   Dashboard
                 </Link>
+                {user?.role === "admin" ? (
+                  <Link
+                    href="/admin"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    Admin
+                  </Link>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {

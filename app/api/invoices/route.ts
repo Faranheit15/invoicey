@@ -3,6 +3,7 @@ import connectDB from "@/lib/mongodb";
 import Invoice from "@/models/Invoice";
 import { requireUser, authErrorResponse } from "@/lib/server/auth";
 import { computeTotals, validateInvoice } from "@/lib/invoice-domain";
+import { recordActivity, logRouteError } from "@/lib/server/log";
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
 
@@ -185,6 +186,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Invalid invoice id" }, { status: 400 });
     }
 
+    logRouteError(error, {
+      req,
+      route: "GET /api/invoices",
+      userId: userUid,
+      category: "invoice",
+    });
     const err = error as Error;
     return NextResponse.json(
       { error: "Internal Server Error", details: err.message },
@@ -219,6 +226,13 @@ export async function POST(req: NextRequest) {
     });
 
     await invoice.save();
+    recordActivity({
+      userId: userUid,
+      type: "invoice_create",
+      invoiceId: String(invoice._id),
+      amount: payload.total,
+      currency: payload.currency,
+    });
     return NextResponse.json(
       {
         message: "Invoice created successfully",
@@ -227,8 +241,13 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error: unknown) {
+    logRouteError(error, {
+      req,
+      route: "POST /api/invoices",
+      userId: userUid,
+      category: "invoice",
+    });
     const err = error as Error;
-    console.error("Error creating invoice:", err.message);
     return NextResponse.json(
       { error: "Internal Server Error", details: err.message },
       { status: 500 }
@@ -277,6 +296,14 @@ export async function PUT(req: NextRequest) {
     Object.assign(existingInvoice, payload);
     await existingInvoice.save();
 
+    recordActivity({
+      userId: userUid,
+      type: "invoice_update",
+      invoiceId: invoiceId,
+      amount: payload.total,
+      currency: payload.currency,
+    });
+
     return NextResponse.json({
       message: "Invoice updated successfully",
       invoice: existingInvoice,
@@ -286,8 +313,13 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Invalid invoice id" }, { status: 400 });
     }
 
+    logRouteError(error, {
+      req,
+      route: "PUT /api/invoices",
+      userId: userUid,
+      category: "invoice",
+    });
     const err = error as Error;
-    console.error("Error updating invoice:", err.message);
     return NextResponse.json(
       { error: "Internal Server Error", details: err.message },
       { status: 500 }
@@ -334,11 +366,23 @@ export async function PATCH(req: NextRequest) {
 
     if (rawPayload.action === "soft_delete") {
       await Invoice.updateOne(ownedFilter, { $set: { is_deleted: true } });
+      recordActivity({
+        userId: userUid,
+        type: "invoice_delete",
+        invoiceId,
+      });
       return NextResponse.json({ message: "Invoice deleted successfully" });
     }
 
     if (rawPayload.action === "settle") {
       await Invoice.updateOne(ownedFilter, { $set: { status: "paid" } });
+      recordActivity({
+        userId: userUid,
+        type: "invoice_settle",
+        invoiceId,
+        amount: invoice.total,
+        currency: invoice.currency,
+      });
       return NextResponse.json({
         message: "Invoice settled successfully",
         invoice: { ...invoice.toObject(), status: "paid" },
@@ -347,6 +391,12 @@ export async function PATCH(req: NextRequest) {
 
     if (rawPayload.status && allowedStatuses.includes(rawPayload.status)) {
       await Invoice.updateOne(ownedFilter, { $set: { status: rawPayload.status } });
+      recordActivity({
+        userId: userUid,
+        type: "invoice_status_change",
+        invoiceId,
+        meta: { from: invoice.status, to: rawPayload.status },
+      });
       return NextResponse.json({
         message: "Invoice status updated successfully",
         invoice: { ...invoice.toObject(), status: rawPayload.status },
@@ -362,6 +412,12 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Invalid invoice id" }, { status: 400 });
     }
 
+    logRouteError(error, {
+      req,
+      route: "PATCH /api/invoices",
+      userId: userUid,
+      category: "invoice",
+    });
     const err = error as Error;
     return NextResponse.json(
       { error: "Internal Server Error", details: err.message },

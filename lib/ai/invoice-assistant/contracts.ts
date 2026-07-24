@@ -52,6 +52,17 @@ export interface InvoiceAssistantProviderInput {
   draft: InvoiceFormState;
 }
 
+export interface InvoiceAssistantTelemetry {
+  model: string;
+  provider: string;
+  /** The full user prompt sent to the model (system prompt + serialized draft). */
+  userPrompt: string;
+  durationMs: number;
+  responseChars: number;
+  finishReason?: string;
+}
+
 export interface InvoiceAssistantProviderOutput {
   text: string;
+  telemetry: InvoiceAssistantTelemetry;
 }

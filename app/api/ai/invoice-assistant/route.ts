@@ -4,6 +4,7 @@ import {
   generateInvoiceAssistantResponse,
   validateAssistantRequest,
 } from "@/lib/ai/invoice-assistant/service";
+import { logEvent } from "@/lib/server/log";
 
 const AI_AUTH_MESSAGES = {
   EmailNotVerified:
@@ -77,8 +78,9 @@ const classifyAiProviderError = (message: string) => {
 };
 
 export async function POST(req: NextRequest) {
+  let userUid: string;
   try {
-    await requireUser(req);
+    userUid = await requireUser(req);
   } catch (error: unknown) {
     return authErrorResponse(error, AI_AUTH_MESSAGES);
   }
@@ -86,11 +88,53 @@ export async function POST(req: NextRequest) {
   try {
     const rawPayload = await req.json();
     const request = validateAssistantRequest(rawPayload);
-    const response = await generateInvoiceAssistantResponse(request);
+    const { response, telemetry } = await generateInvoiceAssistantResponse(
+      request
+    );
+
+    // Full prompt captured per the owner's explicit ask; the writer size-caps
+    // and redacts it. No key can leak — telemetry never carries the request URL.
+    logEvent({
+      category: "ai",
+      event: "ai.request",
+      userId: userUid,
+      message: request.message,
+      meta: {
+        model: telemetry.model,
+        provider: telemetry.provider,
+        fullPrompt: telemetry.userPrompt,
+        conversationLen: request.conversation.length,
+        promptChars: telemetry.userPrompt.length,
+      },
+    });
+    logEvent({
+      category: "ai",
+      event: "ai.response",
+      userId: userUid,
+      meta: {
+        model: telemetry.model,
+        durationMs: telemetry.durationMs,
+        responseChars: telemetry.responseChars,
+        finishReason: telemetry.finishReason,
+        resolution: response.resolution,
+        patchFields: Object.keys(response.patch ?? {}),
+      },
+    });
 
     return NextResponse.json(response);
   } catch (error: unknown) {
     const err = error as Error;
+
+    // Log every non-validation failure as an AI error (provider/config/unknown).
+    if (!isClientError(err.message)) {
+      logEvent({
+        level: "error",
+        category: "ai",
+        event: "ai.error",
+        userId: userUid,
+        message: err.message,
+      });
+    }
 
     if (err.message.includes("Missing GEMINI_API_KEY")) {
       return NextResponse.json(

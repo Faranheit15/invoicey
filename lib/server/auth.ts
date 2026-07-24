@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { DecodedIdToken } from "firebase-admin/auth";
 import admin, { ensureFirebaseAdmin } from "@/lib/firebase-admin";
 
 export type AuthErrorCode =
   | "AuthConfigurationError"
   | "EmailNotVerified"
-  | "Unauthorized";
+  | "Unauthorized"
+  | "AdminForbidden"
+  | "Suspended";
 
 /**
  * Typed authentication error. Replaces the previous pattern of throwing plain
@@ -32,6 +35,8 @@ const DEFAULT_MESSAGES: Record<AuthErrorCode, string> = {
   AuthConfigurationError: "Server authentication is misconfigured",
   EmailNotVerified: "Please verify your email before continuing.",
   Unauthorized: "Unauthorized",
+  AdminForbidden: "You do not have permission to access this resource.",
+  Suspended: "Your account has been suspended.",
 };
 
 /**
@@ -41,7 +46,18 @@ const DEFAULT_MESSAGES: Record<AuthErrorCode, string> = {
  *
  * This is the single source of truth for request auth — import it; do not copy it.
  */
-export const requireUser = async (req: NextRequest): Promise<string> => {
+/**
+ * Verify the Firebase ID token on the Authorization header and return the full
+ * decoded token. Shared core for `requireUser` and `requireAdmin` (lib/server/
+ * admin.ts) so there is exactly one token path.
+ *
+ * `checkRevoked: true` makes verification reject a token whose refresh tokens
+ * were revoked or whose Firebase account was disabled — this is what lets
+ * suspension take effect on the very next request, without a per-request DB read.
+ */
+export const verifyRequestToken = async (
+  req: NextRequest
+): Promise<DecodedIdToken> => {
   try {
     ensureFirebaseAdmin();
   } catch (error: unknown) {
@@ -57,9 +73,9 @@ export const requireUser = async (req: NextRequest): Promise<string> => {
 
   const token = authHeader.split("Bearer ")[1];
 
-  let decodedToken;
+  let decodedToken: DecodedIdToken;
   try {
-    decodedToken = await admin.auth().verifyIdToken(token);
+    decodedToken = await admin.auth().verifyIdToken(token, true);
   } catch (error: unknown) {
     throw new AuthError("Unauthorized", 401, undefined, { cause: error });
   }
@@ -75,6 +91,11 @@ export const requireUser = async (req: NextRequest): Promise<string> => {
     throw new AuthError("EmailNotVerified", 403);
   }
 
+  return decodedToken;
+};
+
+export const requireUser = async (req: NextRequest): Promise<string> => {
+  const decodedToken = await verifyRequestToken(req);
   return decodedToken.uid;
 };
 

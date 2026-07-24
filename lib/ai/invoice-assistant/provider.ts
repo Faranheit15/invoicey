@@ -103,6 +103,7 @@ export const generateInvoiceAssistantCompletion = async ({
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const startedAt = Date.now();
 
   try {
     const response = await fetch(
@@ -141,8 +142,21 @@ export const generateInvoiceAssistantCompletion = async ({
       );
     }
 
+    const text = extractResponseText(payload);
+    const candidate = payload.candidates?.[0];
+
     return {
-      text: extractResponseText(payload),
+      text,
+      // Telemetry for observability. NEVER include the request URL — it carries
+      // the Gemini API key in the query string.
+      telemetry: {
+        model,
+        provider,
+        userPrompt,
+        durationMs: Date.now() - startedAt,
+        responseChars: text.length,
+        finishReason: candidate?.finishReason,
+      },
     };
   } catch (error: unknown) {
     if (error instanceof Error && error.name === "AbortError") {

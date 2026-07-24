@@ -53,6 +53,17 @@
     --border: 217 33% 22%;
     --input: 217 33% 22%;
     --ring: 212 95% 68%;
+    /*
+     * Chart series keep their hue/saturation across themes so a series stays
+     * recognizable, but gain ~8-12% lightness on the dark ground (222 47% 11%)
+     * where the teal/sky/emerald otherwise read muddy. Chrome (axes, grid,
+     * tooltip) uses the inverting tokens above, so only the series need this.
+     */
+    --chart-1: 18 90% 62%;
+    --chart-2: 199 90% 62%;
+    --chart-3: 165 70% 50%;
+    --chart-4: 43 96% 62%;
+    --chart-5: 262 85% 70%;
   }
 
   * {
