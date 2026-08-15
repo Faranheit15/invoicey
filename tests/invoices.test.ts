@@ -123,6 +123,28 @@ describe("mapFormStateToPayload", () => {
     expect(payload.items[0].unitPrice).toBe(0);
     expect(payload.items[0].description).toBe("A");
   });
+
+  it("clamps numbers to the shared ceilings as well as the floors", () => {
+    const form: InvoiceFormState = {
+      ...createDefaultInvoiceFormState(),
+      discount: 5_000_000_000,
+      cgst: 5_000_000_000,
+      items: [{ description: "A", quantity: 999_999, unitPrice: 500_000_000 }],
+    };
+    const payload = mapFormStateToPayload(form);
+    expect(payload.items[0].quantity).toBe(100_000);
+    expect(payload.items[0].unitPrice).toBe(100_000_000);
+    expect(payload.discount).toBe(100_000_000);
+    expect(payload.cgst).toBe(100_000_000);
+  });
+
+  it("keeps a fractional quantity — the assistant is allowed to set one", () => {
+    const form: InvoiceFormState = {
+      ...createDefaultInvoiceFormState(),
+      items: [{ description: "A", quantity: 2.5, unitPrice: 10 }],
+    };
+    expect(mapFormStateToPayload(form).items[0].quantity).toBe(2.5);
+  });
 });
 
 describe("getInvoiceStatus", () => {

@@ -53,6 +53,33 @@ Formula: `subtotal - discount + cgst + sgst + convenienceCharge`, clamped at 0, 
 
 `convenienceCharge` is labeled "Service Charge" in all user-facing output.
 
+### Numeric fields are text inputs
+
+Every number in the editor (Qty, Unit price, Discount, Service Charge, CGST,
+SGST) goes through `components/ui/numeric-input.tsx`, never a raw
+`<input type="number">`. Binding a number input straight to numeric state made
+fields impossible to clear — backspacing to `""` fell back to the minimum and
+the next keypress appended to it (`1` → `12`, `18`, `19`) — and silently ate
+partially typed decimals, because `type="number"` reports `""` for both a
+cleared field and `"12."`.
+
+`NumericInput` is a text input with `inputMode`, holding the raw keystrokes in a
+draft string while focused and handing the parent only numbers. All of its
+decision logic is pure and tested in `lib/numeric-input.ts` (`tests/numeric-input.test.ts`);
+the component is just the DOM adapter. The rules that matter if you touch it:
+the **floor is applied on blur** (applying it per keystroke is the original bug),
+the **ceiling and rounding are applied per keystroke**, an empty draft publishes
+the field minimum rather than 0 (a blank Qty must not momentarily zero the
+subtotal and, through the percent-mode effects, the stored CGST/SGST), and the
+draft is dropped whenever the value changes from outside (AI patch, row removal,
+%/₹ toggle). Do not re-add clamping in the parent `onValueChange` — a second
+clamp makes the value differ from what the field published and wipes the draft
+mid-typing.
+
+`MAX_ITEM_QUANTITY` / `MAX_ITEM_UNIT_PRICE` / `MAX_MONEY_VALUE` live in
+`lib/invoice-domain.ts` and are enforced in three places: the fields,
+`mapFormStateToPayload`, and the API's `normalizeItems`/`normalizePayload`.
+
 ### CGST/SGST vs legacy `tax`
 
 Writes use `cgst` + `sgst`. Read paths keep `?? tax` fallbacks ([lib/invoices.ts:220](lib/invoices.ts:220) for the form mapper, and `resolveRecordAmounts` in `lib/invoice-domain.ts` for the exporters) — load-bearing because the migration intentionally leaves `tax` in the database. Percent-vs-amount is UI-only state in `InvoiceEditor`; only the resolved amount is persisted, so an edited invoice always reopens in amount mode.

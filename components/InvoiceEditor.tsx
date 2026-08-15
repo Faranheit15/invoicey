@@ -1,12 +1,13 @@
 "use client";
 
-import { type FocusEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DatePickerField } from "@/components/ui/date-picker-field";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NumericInput } from "@/components/ui/numeric-input";
 import { SelectField } from "@/components/ui/select-field";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertBanner, LiveStatus } from "@/components/ui/alert-banner";
@@ -21,7 +22,12 @@ import {
 } from "@/lib/api-client";
 import type { InvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/contracts";
 import { applyInvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/apply-patch";
-import { buildTotalsRows } from "@/lib/invoice-domain";
+import {
+  MAX_ITEM_QUANTITY,
+  MAX_ITEM_UNIT_PRICE,
+  MAX_MONEY_VALUE,
+  buildTotalsRows,
+} from "@/lib/invoice-domain";
 import {
   STATUS_PILL_BASE,
   statusPillOnMastheadClass,
@@ -55,21 +61,14 @@ interface InvoiceEditorProps {
 
 // Input ceilings. The server recomputes and clamps every total, so these exist
 // to stop a paste or a stuck key from producing an invoice no client would
-// accept — and to keep the preview and the printed sheet legible.
+// accept — and to keep the preview and the printed sheet legible. The numeric
+// ceilings live in lib/invoice-domain so the API enforces the same ones.
 const TEXT_FIELD_MAX = 120;
 const INVOICE_NUMBER_MAX = 40;
 const ADDRESS_FIELD_MAX = 400;
 const NOTES_FIELD_MAX = 1000;
 const URL_FIELD_MAX = 2048;
-const MAX_ITEM_QUANTITY = 100_000;
-const MAX_ITEM_UNIT_PRICE = 100_000_000;
 const MAX_LINE_ITEMS = 100;
-
-const clampQuantity = (value: number) =>
-  Math.min(MAX_ITEM_QUANTITY, Math.max(1, Math.round(value)));
-
-const clampUnitPrice = (value: number) =>
-  Math.min(MAX_ITEM_UNIT_PRICE, Math.max(0, value));
 
 export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const router = useRouter();
@@ -258,20 +257,6 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
         items: prev.items.filter((_, itemIndex) => itemIndex !== index),
       };
     });
-  };
-
-  const parseNumberInput = (value: string, fallback = 0) => {
-    if (!value.trim()) {
-      return fallback;
-    }
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  };
-
-  const selectZeroValueOnFocus = (event: FocusEvent<HTMLInputElement>) => {
-    if (event.target.value === "0") {
-      event.target.select();
-    }
   };
 
   const saveInvoice = async (status: InvoiceStatus = invoice.status) => {
@@ -752,35 +737,23 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                               updateItem(index, "description", event.target.value)
                             }
                           />
-                          <Input
+                          <NumericInput
                             aria-label={`Line ${index + 1} quantity`}
-                            type="number"
                             min={1}
                             max={MAX_ITEM_QUANTITY}
+                            decimals={0}
                             value={item.quantity}
-                            onFocus={selectZeroValueOnFocus}
-                            onChange={(event) =>
-                              updateItem(
-                                index,
-                                "quantity",
-                                clampQuantity(parseNumberInput(event.target.value, 1))
-                              )
+                            onValueChange={(quantity) =>
+                              updateItem(index, "quantity", quantity)
                             }
                           />
-                          <Input
+                          <NumericInput
                             aria-label={`Line ${index + 1} unit price`}
-                            type="number"
                             min={0}
                             max={MAX_ITEM_UNIT_PRICE}
-                            step="0.01"
                             value={item.unitPrice}
-                            onFocus={selectZeroValueOnFocus}
-                            onChange={(event) =>
-                              updateItem(
-                                index,
-                                "unitPrice",
-                                clampUnitPrice(parseNumberInput(event.target.value, 0))
-                              )
+                            onValueChange={(unitPrice) =>
+                              updateItem(index, "unitPrice", unitPrice)
                             }
                             placeholder="0.00"
                           />
@@ -827,39 +800,27 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                           <div className="grid grid-cols-2 gap-2">
                             <Field label="Qty">
                               {(field) => (
-                                <Input
+                                <NumericInput
                                   {...field}
-                                  type="number"
                                   min={1}
                                   max={MAX_ITEM_QUANTITY}
+                                  decimals={0}
                                   value={item.quantity}
-                                  onFocus={selectZeroValueOnFocus}
-                                  onChange={(event) =>
-                                    updateItem(
-                                      index,
-                                      "quantity",
-                                      clampQuantity(parseNumberInput(event.target.value, 1))
-                                    )
+                                  onValueChange={(quantity) =>
+                                    updateItem(index, "quantity", quantity)
                                   }
                                 />
                               )}
                             </Field>
                             <Field label="Unit price">
                               {(field) => (
-                                <Input
+                                <NumericInput
                                   {...field}
-                                  type="number"
                                   min={0}
                                   max={MAX_ITEM_UNIT_PRICE}
-                                  step="0.01"
                                   value={item.unitPrice}
-                                  onFocus={selectZeroValueOnFocus}
-                                  onChange={(event) =>
-                                    updateItem(
-                                      index,
-                                      "unitPrice",
-                                      clampUnitPrice(parseNumberInput(event.target.value, 0))
-                                    )
+                                  onValueChange={(unitPrice) =>
+                                    updateItem(index, "unitPrice", unitPrice)
                                   }
                                   placeholder="0.00"
                                 />
@@ -906,20 +867,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     >
                       Discount
                     </label>
-                    <Input
+                    <NumericInput
                       id="discount"
-                      type="number"
                       min={0}
-                      step="0.01"
+                      max={MAX_MONEY_VALUE}
                       placeholder="0.00"
                       value={invoice.discount}
-                      onFocus={selectZeroValueOnFocus}
-                      onChange={(event) =>
-                        updateField(
-                          "discount",
-                          Math.max(0, parseNumberInput(event.target.value, 0))
-                        )
-                      }
+                      onValueChange={(discount) => updateField("discount", discount)}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -929,19 +883,14 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     >
                       Service Charge
                     </label>
-                    <Input
+                    <NumericInput
                       id="service-charge"
-                      type="number"
                       min={0}
-                      step="0.01"
+                      max={MAX_MONEY_VALUE}
                       placeholder="0.00"
                       value={invoice.convenienceCharge}
-                      onFocus={selectZeroValueOnFocus}
-                      onChange={(event) =>
-                        updateField(
-                          "convenienceCharge",
-                          Math.max(0, parseNumberInput(event.target.value, 0))
-                        )
+                      onValueChange={(convenienceCharge) =>
+                        updateField("convenienceCharge", convenienceCharge)
                       }
                     />
                   </div>
@@ -953,16 +902,17 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       CGST
                     </label>
                     <div className="flex gap-1.5">
-                      <Input
+                      <NumericInput
                         id="cgst"
-                        type="number"
                         min={0}
-                        step="0.01"
+                        // In percent mode this box holds a rate, not an amount,
+                        // so the ceiling is 100. NumericInput applies the
+                        // ceiling as you type, which matters here because the
+                        // value actually persisted is the derived amount.
+                        max={cgstMode === "percent" ? 100 : MAX_MONEY_VALUE}
                         placeholder="0.00"
                         value={cgstMode === "percent" ? cgstRate : invoice.cgst}
-                        onFocus={selectZeroValueOnFocus}
-                        onChange={(event) => {
-                          const val = Math.max(0, parseNumberInput(event.target.value, 0));
+                        onValueChange={(val) => {
                           if (cgstMode === "percent") {
                             setCgstRate(val);
                             updateField("cgst", Number(((val / 100) * totals.subtotal).toFixed(2)));
@@ -1010,16 +960,17 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       SGST
                     </label>
                     <div className="flex gap-1.5">
-                      <Input
+                      <NumericInput
                         id="sgst"
-                        type="number"
                         min={0}
-                        step="0.01"
+                        // In percent mode this box holds a rate, not an amount,
+                        // so the ceiling is 100. NumericInput applies the
+                        // ceiling as you type, which matters here because the
+                        // value actually persisted is the derived amount.
+                        max={sgstMode === "percent" ? 100 : MAX_MONEY_VALUE}
                         placeholder="0.00"
                         value={sgstMode === "percent" ? sgstRate : invoice.sgst}
-                        onFocus={selectZeroValueOnFocus}
-                        onChange={(event) => {
-                          const val = Math.max(0, parseNumberInput(event.target.value, 0));
+                        onValueChange={(val) => {
                           if (sgstMode === "percent") {
                             setSgstRate(val);
                             updateField("sgst", Number(((val / 100) * totals.subtotal).toFixed(2)));

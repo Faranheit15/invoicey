@@ -1,4 +1,10 @@
-import { computeTotals } from "@/lib/invoice-domain";
+import {
+  MAX_ITEM_QUANTITY,
+  MAX_ITEM_UNIT_PRICE,
+  MAX_MONEY_VALUE,
+  clampToLimit,
+  computeTotals,
+} from "@/lib/invoice-domain";
 
 export type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
 
@@ -220,15 +226,22 @@ export const mapFormStateToPayload = (form: InvoiceFormState): InvoicePayload =>
     notes: form.notes.trim(),
     currency: form.currency,
     status: form.status,
+    // Ceilings as well as floors: the fields clamp as you type, but nothing
+    // guarantees a value reached this mapper through a field at all (the AI
+    // patch and a restored draft both bypass them). Quantity is deliberately
+    // not rounded here — the assistant is allowed to set a fractional one.
     items: form.items.map((item) => ({
       description: item.description.trim(),
-      quantity: Math.max(1, toNumber(item.quantity, 1)),
-      unitPrice: Math.max(0, toNumber(item.unitPrice, 0)),
+      quantity: clampToLimit(toNumber(item.quantity, 1), MAX_ITEM_QUANTITY, 1),
+      unitPrice: clampToLimit(toNumber(item.unitPrice, 0), MAX_ITEM_UNIT_PRICE),
     })),
-    discount: Math.max(0, toNumber(form.discount, 0)),
-    cgst: Math.max(0, toNumber(form.cgst, 0)),
-    sgst: Math.max(0, toNumber(form.sgst, 0)),
-    convenienceCharge: Math.max(0, toNumber(form.convenienceCharge, 0)),
+    discount: clampToLimit(toNumber(form.discount, 0), MAX_MONEY_VALUE),
+    cgst: clampToLimit(toNumber(form.cgst, 0), MAX_MONEY_VALUE),
+    sgst: clampToLimit(toNumber(form.sgst, 0), MAX_MONEY_VALUE),
+    convenienceCharge: clampToLimit(
+      toNumber(form.convenienceCharge, 0),
+      MAX_MONEY_VALUE
+    ),
     paymentInfo: form.paymentInfo.trim(),
   };
 };

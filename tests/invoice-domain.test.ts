@@ -20,6 +20,23 @@ describe("computeTotals", () => {
     ).toBe(0);
   });
 
+  it("lets a line contribute nothing while its quantity box is empty", () => {
+    // Clearing a Qty field publishes the field minimum, but a zero can still
+    // reach the formula (typed, or from a record); it must not go negative.
+    const totals = computeTotals({
+      items: [
+        { quantity: 0, unitPrice: 250 },
+        { quantity: 2, unitPrice: 100 },
+      ],
+      discount: 0,
+      cgst: 0,
+      sgst: 0,
+      convenienceCharge: 0,
+    });
+    expect(totals.subtotal).toBe(200);
+    expect(totals.total).toBe(200);
+  });
+
   it("matches the previous inline server formula for a normal invoice", () => {
     const t = computeTotals({
       items: [

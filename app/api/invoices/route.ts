@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongodb";
 import Invoice from "@/models/Invoice";
 import { requireUser, authErrorResponse } from "@/lib/server/auth";
-import { computeTotals, validateInvoice } from "@/lib/invoice-domain";
+import {
+  MAX_ITEM_QUANTITY,
+  MAX_ITEM_UNIT_PRICE,
+  MAX_MONEY_VALUE,
+  clampToLimit,
+  computeTotals,
+  validateInvoice,
+} from "@/lib/invoice-domain";
 import { recordActivity, logRouteError } from "@/lib/server/log";
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
@@ -90,8 +97,13 @@ const normalizeItems = (items: RawInvoiceItem[] = []) => {
   return items
     .map((item) => {
       const name = cleanString(item.description || item.name);
-      const quantity = Math.max(1, toNumber(item.quantity, 1));
-      const price = Math.max(0, toNumber(item.unitPrice ?? item.price, 0));
+      // Clamped both ways here too: the editor's fields are not the only way a
+      // request reaches this handler.
+      const quantity = clampToLimit(toNumber(item.quantity, 1), MAX_ITEM_QUANTITY, 1);
+      const price = clampToLimit(
+        toNumber(item.unitPrice ?? item.price, 0),
+        MAX_ITEM_UNIT_PRICE
+      );
       return { name, quantity, price };
     })
     .filter((item) => item.name.length > 0);
@@ -106,10 +118,13 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
       quantity: item.quantity,
       unitPrice: item.price,
     })),
-    discount: toNumber(raw.discount, 0),
-    cgst: toNumber(raw.cgst, 0),
-    sgst: toNumber(raw.sgst, 0),
-    convenienceCharge: toNumber(raw.convenienceCharge, 0),
+    discount: clampToLimit(toNumber(raw.discount, 0), MAX_MONEY_VALUE),
+    cgst: clampToLimit(toNumber(raw.cgst, 0), MAX_MONEY_VALUE),
+    sgst: clampToLimit(toNumber(raw.sgst, 0), MAX_MONEY_VALUE),
+    convenienceCharge: clampToLimit(
+      toNumber(raw.convenienceCharge, 0),
+      MAX_MONEY_VALUE
+    ),
   });
 
   const allowedStatuses: InvoiceStatus[] = ["draft", "sent", "paid", "overdue"];

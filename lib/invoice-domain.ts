@@ -11,6 +11,20 @@ import type { InvoiceRecord } from "@/lib/invoices";
 
 export const round2 = (value: number): number => Number((value || 0).toFixed(2));
 
+/**
+ * Input ceilings. They exist so a paste or a stuck key cannot produce an
+ * invoice no one would accept, and so the printed sheet stays legible. Shared
+ * by the editor's fields, `mapFormStateToPayload`, and the API's own
+ * normalization — the client is not the only place they are enforced.
+ */
+export const MAX_ITEM_QUANTITY = 100_000;
+export const MAX_ITEM_UNIT_PRICE = 100_000_000;
+export const MAX_MONEY_VALUE = 100_000_000;
+
+/** Clamp a money-ish number into [0, limit]; NaN and friends collapse to 0. */
+export const clampToLimit = (value: number, limit: number, floor = 0): number =>
+  Math.min(limit, Math.max(floor, Number.isFinite(value) ? value : floor));
+
 export interface LineItemAmount {
   quantity: number;
   unitPrice: number;
