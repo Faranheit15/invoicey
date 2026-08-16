@@ -23,6 +23,17 @@ import {
 } from "@/lib/gst-supply";
 import { formatGstRate, placeOfSupplyLabelFor } from "@/lib/gst-rates";
 import { amountInWordsIndian } from "@/lib/amount-in-words";
+import {
+  buildUpiLink,
+  isValidVpa,
+  normalizeAccountNumber,
+  normalizeIfsc,
+  normalizeVpa,
+  supportsUpi,
+  toUpiReference,
+  type UpiLink,
+} from "@/lib/upi";
+import { createQrSvg } from "@/lib/qr";
 
 const escapeHtml = (value: string) => {
   return value
@@ -272,8 +283,110 @@ const gstDetailRows = (invoice: InvoiceRecord): Array<[string, string]> => {
 const COMPUTER_GENERATED_NOTE =
   "This is a computer-generated invoice and does not require a signature.";
 
+/* -------------------------------------------------------------------------- */
+/* Payment block                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The seller's payment identity, as held by the BUSINESS PROFILE.
+ *
+ * It arrives as an option rather than off the `InvoiceRecord` because it is not
+ * part of the document: an invoice is a historical record, and where the money
+ * goes is current configuration. Re-printing last year's invoice after changing
+ * banks should show the account that can actually be paid today, not one that
+ * has been closed. (The opposite argument — snapshot it, like the GSTIN — is
+ * defensible and is what Rule 46 forces for the tax identities; it is not
+ * forced here, and the live value is the more useful of the two.)
+ */
+export interface InvoicePaymentDetails {
+  /** UPI VPA. Re-validated here; an invalid one prints nothing at all. */
+  upiVpa?: string;
+  /** Name shown to the payer in their app. Falls back to the invoice's company name. */
+  payeeName?: string;
+  bankName?: string;
+  bankAccountName?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
+}
+
+export interface InvoicePaymentBlock {
+  /** Bank particulars as label/value pairs. May be empty. */
+  rows: Array<[string, string]>;
+  /** The UPI link, or null when there is no valid VPA or the invoice is not in INR. */
+  upi: UpiLink | null;
+}
+
+/**
+ * Decide what the "How to pay" block contains — with no markup involved, so the
+ * conditions can be tested directly.
+ *
+ * TWO RULES, both about not printing something wrong:
+ *
+ *  1. The QR is INR-ONLY. A `upi://pay` URI cannot carry another currency, so a
+ *     QR on a USD invoice would ask the payer for that number of RUPEES. There
+ *     is no partially-correct version of this; the QR is omitted.
+ *  2. An invalid VPA prints nothing. It would produce a code that opens the
+ *     client's banking app and fails there, in front of the client, which is a
+ *     worse outcome for the user than an invoice with no QR on it.
+ *
+ * Bank particulars are NOT INR-gated: an overseas client paying by wire still
+ * needs the account, and nothing about those rows can be silently wrong.
+ */
+export const buildPaymentBlock = (
+  invoice: InvoiceRecord,
+  payment: InvoicePaymentDetails | undefined,
+  total: number
+): InvoicePaymentBlock | null => {
+  if (!payment) {
+    return null;
+  }
+
+  const vpa = normalizeVpa(payment.upiVpa);
+  const currency = invoice.currency || "INR";
+  const upi =
+    isValidVpa(vpa) && supportsUpi(currency)
+      ? buildUpiLink({
+          vpa,
+          payeeName: payment.payeeName || invoice.companyName,
+          amount: total,
+          currency,
+          note: invoice.invoiceNumber
+            ? `Invoice ${invoice.invoiceNumber}`
+            : "Invoice",
+          reference: toUpiReference(invoice.invoiceNumber),
+        })
+      : null;
+
+  const rows: Array<[string, string]> = [];
+  if (upi) {
+    rows.push(["UPI ID", upi.vpa]);
+  }
+  const accountName = (payment.bankAccountName ?? "").trim();
+  if (accountName) {
+    rows.push(["Account name", accountName]);
+  }
+  const bankName = (payment.bankName ?? "").trim();
+  if (bankName) {
+    rows.push(["Bank", bankName]);
+  }
+  const accountNumber = normalizeAccountNumber(payment.bankAccountNumber);
+  if (accountNumber) {
+    rows.push(["Account number", accountNumber]);
+  }
+  const ifsc = normalizeIfsc(payment.bankIfsc);
+  if (ifsc) {
+    rows.push(["IFSC", ifsc]);
+  }
+
+  if (!upi && rows.length === 0) {
+    return null;
+  }
+  return { rows, upi };
+};
+
 interface CreateInvoiceHtmlOptions {
   autoPrint?: boolean;
+  payment?: InvoicePaymentDetails;
 }
 
 export const createInvoiceHtml = (
@@ -307,6 +420,43 @@ export const createInvoiceHtml = (
     (invoice.signatureLabel ?? "").trim() ||
     `For ${invoice.companyName?.trim() || "us"}`;
   const signatureImageUrl = toSafeImageUrl(invoice.signatureImageUrl);
+
+  // The pay block. `createQrSvg` returns null rather than throwing if a payload
+  // will not fit any QR version, so an unprintable code costs the invoice
+  // nothing — it prints without one.
+  const payment = buildPaymentBlock(invoice, options.payment, amounts.total);
+  const qrSvg = payment?.upi
+    ? createQrSvg(payment.upi.uri, {
+        quietZone: 4,
+        label: `UPI payment QR code for ${payment.upi.vpa}`,
+      })
+    : null;
+  // The SVG is markup WE generate — a background rect and one path of module
+  // geometry, no user text in the document at all. The one user-derived string
+  // it carries is the aria-label, which `renderQrSvg` escapes itself. Every
+  // other interpolation below goes through `escapeHtml`.
+  const paymentBlockHtml = payment
+    ? `<section class="payment">
+        <h3>How to pay</h3>
+        <div class="payment-grid">
+          <table class="payment-rows">
+            ${payment.rows
+              .map(
+                ([label, value]) =>
+                  `<tr><td class="label">${escapeHtml(
+                    label
+                  )}</td><td class="value">${escapeHtml(value)}</td></tr>`
+              )
+              .join("")}
+          </table>
+          ${
+            qrSvg
+              ? `<figure class="payment-qr">${qrSvg}<figcaption>Scan with any UPI app</figcaption></figure>`
+              : ""
+          }
+        </div>
+      </section>`
+    : "";
 
   // One class list per column, shared by the header and every body cell, so a
   // column cannot be right-aligned in the head and left-aligned in the body.
@@ -659,6 +809,80 @@ export const createInvoiceHtml = (
         color: #111827;
       }
 
+      /* The pay block sits between the totals and the notes: the reader has
+         just seen what they owe, and this is how they settle it. It must not
+         be split across a page break — half a QR is an unscannable QR. */
+      .payment {
+        padding: 0 28px 24px;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+
+      .payment h3 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #6b7280;
+      }
+
+      .payment-grid {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 24px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 14px 16px;
+      }
+
+      .payment-rows {
+        width: auto;
+        border-collapse: collapse;
+        font-size: 12px;
+        color: #374151;
+      }
+
+      .payment-rows td {
+        border-bottom: none;
+        padding: 3px 0;
+        vertical-align: top;
+      }
+
+      .payment-rows .label {
+        padding-right: 16px;
+        color: #6b7280;
+        white-space: nowrap;
+      }
+
+      .payment-rows .value {
+        color: #111827;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .payment-qr {
+        margin: 0;
+        text-align: center;
+        flex: none;
+      }
+
+      /* A QR must print as a QR, not as a grey approximation of one: force the
+         browser to keep the black, and never scale it below scanning size. */
+      .payment-qr svg {
+        display: block;
+        width: 118px;
+        height: 118px;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .payment-qr figcaption {
+        margin-top: 6px;
+        font-size: 10px;
+        color: #6b7280;
+      }
+
       .notes {
         padding: 0 28px 28px;
         color: #374151;
@@ -888,6 +1112,8 @@ export const createInvoiceHtml = (
             )}</section>`
           : ""
       }
+
+      ${paymentBlockHtml}
 
       <section class="notes">
         ${

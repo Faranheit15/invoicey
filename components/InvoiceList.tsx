@@ -6,19 +6,24 @@ import {
   InvoiceStatus,
   formatCurrency,
   formatDateLong,
-  getInvoiceStatus,
 } from "@/lib/invoices";
 import {
   STATUS_PILL_BASE,
+  resolveDisplayStatus,
   statusPillClass,
 } from "@/lib/invoice-status";
-import { EyeOpenIcon, Pencil1Icon } from "@radix-ui/react-icons";
+import { CopyIcon, EyeOpenIcon, Pencil1Icon } from "@radix-ui/react-icons";
 
 export interface InvoiceActionHandlers {
   onView: () => void;
   onEdit: () => void;
   onSettle: () => void;
   onDelete: () => void;
+  /**
+   * Optional so a list that has nowhere to send a new draft (the admin surface)
+   * simply does not render the control.
+   */
+  onDuplicate?: () => void;
 }
 
 interface RowActionsProps extends InvoiceActionHandlers {
@@ -43,6 +48,7 @@ export function InvoiceRowActions({
   onEdit,
   onSettle,
   onDelete,
+  onDuplicate,
   touch = false,
 }: RowActionsProps) {
   const sizeClass = touch ? "h-11 min-w-[88px] flex-1" : "";
@@ -70,6 +76,22 @@ export function InvoiceRowActions({
         <Pencil1Icon className="w-4 h-4" />
         Edit
       </Button>
+      {/* The retainer button. Next month's invoice to the same client is this
+          one with a new number and new dates, and retyping ~23 fields for it is
+          what makes invoice #12 cost what invoice #1 cost. */}
+      {onDuplicate ? (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onDuplicate}
+          disabled={isActioning}
+          aria-label={`Duplicate ${invoice.invoiceNumber}`}
+          className={sizeClass}
+        >
+          <CopyIcon className="w-4 h-4" />
+          Duplicate
+        </Button>
+      ) : null}
       {status !== "paid" ? (
         <Button
           size="sm"
@@ -120,7 +142,7 @@ export function InvoiceCardList({
   return (
     <ul className={className}>
       {invoices.map((invoice) => {
-        const status = getInvoiceStatus(invoice);
+        const status = resolveDisplayStatus(invoice);
         const isActioning = activeActionInvoiceId === invoice._id;
         return (
           <li

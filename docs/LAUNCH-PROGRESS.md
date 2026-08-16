@@ -152,14 +152,30 @@ Still open:
 
 ## Phase 3 — Make it worth coming back to
 
-- [ ] Client memory
-- [ ] Duplicate invoice
-- [ ] Dashboard search / filter / sort / pagination
-- [ ] Derived overdue + aging buckets
-- [ ] UPI QR + structured bank block
-- [ ] `wa.me` share + `navigator.share`
-- [ ] Unsaved-changes guard + localStorage draft
-- [ ] Sticky mobile action bar; validate-all + focus first invalid
+- [x] Client memory
+- [x] Duplicate invoice
+- [x] Dashboard search / filter / sort / pagination
+- [x] Derived overdue + aging buckets
+- [x] UPI QR + structured bank block
+- [x] `wa.me` share + `navigator.share`
+- [x] Unsaved-changes guard + localStorage draft
+- [x] Sticky mobile action bar; validate-all + focus first invalid
+
+### Found during Phase 3
+
+- [x] The dashboard summed INR and USD invoices into one number and labelled it
+      with whatever currency the first invoice happened to use — arithmetically
+      real, financially meaningless. Now grouped by currency.
+- [x] Two QR encoder bugs that produced perfect-looking, undecodable symbols:
+      short EC blocks missing the placeholder byte before interleaving, and the
+      zigzag not stepping left past the timing column. Found by diffing 368
+      matrices against an independent encoder, not by inspection.
+- [x] Line-item rows exist twice in the DOM (table and cards, swapped by media
+      query), so stamping both would have left focus-first-invalid focusing a
+      `display:none` element half the time.
+- [x] The localStorage draft was cleared only incidentally by a blanket
+      `localStorage.clear()`; now explicit, because it holds the client's name,
+      address and amounts.
 
 ## Phase 4 — Strategic bets
 

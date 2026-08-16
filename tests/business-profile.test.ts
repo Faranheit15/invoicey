@@ -136,6 +136,11 @@ describe("GET /api/profile — the empty shape", () => {
       supplierStateCode: "",
       taxTreatment: "none",
       lutArn: "",
+      upiVpa: "",
+      bankAccountName: "",
+      bankAccountNumber: "",
+      bankIfsc: "",
+      bankName: "",
       defaultCurrency: "INR",
       defaultTerms: "",
       defaultPaymentInfo: "",
@@ -341,5 +346,63 @@ describe("server-side normalization", () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("Invalid request body.");
     expect(body.error).not.toContain("SyntaxError");
+  });
+});
+
+describe("payment identity", () => {
+  it("stores a valid UPI ID, lower-cased", async () => {
+    const body = await readBody(
+      await PUT(makeReq({ upiVpa: "  ACME@OKHDFCBANK " }))
+    );
+    expect(body.profile.upiVpa).toBe("acme@okhdfcbank");
+  });
+
+  it("REFUSES an invalid UPI ID rather than dropping it silently", async () => {
+    // Silently blanking it would leave the user printing invoices with no QR
+    // and no way to find out why.
+    const res = await PUT(makeReq({ upiVpa: "acme@" }));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("UPI ID");
+    expect(store.size).toBe(0);
+  });
+
+  it("normalizes the IFSC and the account number, and rejects bad ones", async () => {
+    const body = await readBody(
+      await PUT(
+        makeReq({
+          bankIfsc: " hdfc0000123 ",
+          bankAccountNumber: "0000 1111 2222",
+          bankName: "HDFC Bank",
+          bankAccountName: "Acme Inc",
+        })
+      )
+    );
+    expect(body.profile.bankIfsc).toBe("HDFC0000123");
+    expect(body.profile.bankAccountNumber).toBe("000011112222");
+    expect(body.profile.bankName).toBe("HDFC Bank");
+
+    expect((await PUT(makeReq({ bankIfsc: "HDFC1000123" }))).status).toBe(400);
+    expect((await PUT(makeReq({ bankAccountNumber: "12" }))).status).toBe(400);
+  });
+
+  it("ignores a non-string payment field instead of coercing it", async () => {
+    const body = await readBody(
+      await PUT(
+        makeReq({ upiVpa: { $ne: null }, bankIfsc: 42, bankAccountNumber: [] })
+      )
+    );
+    expect(body.profile.upiVpa).toBe("");
+    expect(body.profile.bankIfsc).toBe("");
+    expect(body.profile.bankAccountNumber).toBe("");
+  });
+
+  it("is empty on a profile that has never been saved", async () => {
+    const body = await readBody(await GET(makeReq()));
+    expect(body.profile.upiVpa).toBe("");
+    expect(body.profile.bankName).toBe("");
+    expect(body.profile.bankAccountName).toBe("");
+    expect(body.profile.bankAccountNumber).toBe("");
+    expect(body.profile.bankIfsc).toBe("");
   });
 });

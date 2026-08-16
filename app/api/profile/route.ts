@@ -15,6 +15,14 @@ import {
   GST_STATE_CODES,
 } from "@/lib/gstin";
 import { CURRENCY_OPTIONS } from "@/lib/invoices";
+import {
+  isValidAccountNumber,
+  isValidIfsc,
+  isValidVpa,
+  normalizeAccountNumber,
+  normalizeIfsc,
+  normalizeVpa,
+} from "@/lib/upi";
 import { recordActivity, logRouteError } from "@/lib/server/log";
 
 /**
@@ -56,6 +64,11 @@ interface RawBusinessProfile {
   supplierStateCode?: unknown;
   taxTreatment?: unknown;
   lutArn?: unknown;
+  upiVpa?: unknown;
+  bankAccountName?: unknown;
+  bankAccountNumber?: unknown;
+  bankIfsc?: unknown;
+  bankName?: unknown;
   defaultCurrency?: unknown;
   defaultTerms?: unknown;
   defaultPaymentInfo?: unknown;
@@ -83,6 +96,11 @@ export const emptyBusinessProfile = (): Required<BusinessProfileFields> => ({
   supplierStateCode: "",
   taxTreatment: "none",
   lutArn: "",
+  upiVpa: "",
+  bankAccountName: "",
+  bankAccountNumber: "",
+  bankIfsc: "",
+  bankName: "",
   defaultCurrency: "INR",
   defaultTerms: "",
   defaultPaymentInfo: "",
@@ -175,6 +193,34 @@ export const normalizeBusinessProfile = (
       : "gst"
     : "none";
 
+  // Payment identity. Each of the three validated ones is REFUSED rather than
+  // silently dropped: a user who mistypes their VPA and is told nothing would
+  // print invoices with no QR and never learn why. The normalise-then-reject
+  // split is the same as the GSTIN's — a pasted "ACME@OKHDFCBANK" is corrected,
+  // an "acme@" is refused.
+  const upiVpa = normalizeVpa(
+    typeof raw.upiVpa === "string" ? raw.upiVpa : ""
+  ).slice(0, MAX_SHORT);
+  if (upiVpa && !isValidVpa(upiVpa)) {
+    return {
+      error: "That UPI ID is not valid. It should look like yourname@bank.",
+    };
+  }
+
+  const bankIfsc = normalizeIfsc(
+    typeof raw.bankIfsc === "string" ? raw.bankIfsc : ""
+  ).slice(0, 16);
+  if (bankIfsc && !isValidIfsc(bankIfsc)) {
+    return { error: "That IFSC is not valid. It should look like HDFC0000123." };
+  }
+
+  const bankAccountNumber = normalizeAccountNumber(
+    typeof raw.bankAccountNumber === "string" ? raw.bankAccountNumber : ""
+  ).slice(0, 20);
+  if (bankAccountNumber && !isValidAccountNumber(bankAccountNumber)) {
+    return { error: "That account number should be 6 to 20 digits." };
+  }
+
   const currency = cleanString(raw.defaultCurrency, 8).toUpperCase();
 
   return {
@@ -189,6 +235,11 @@ export const normalizeBusinessProfile = (
       supplierStateCode,
       taxTreatment,
       lutArn: cleanString(raw.lutArn, MAX_SHORT).toUpperCase(),
+      upiVpa,
+      bankAccountName: cleanString(raw.bankAccountName, MAX_SHORT),
+      bankAccountNumber,
+      bankIfsc,
+      bankName: cleanString(raw.bankName, MAX_SHORT),
       defaultCurrency: CURRENCY_OPTIONS.includes(currency) ? currency : "INR",
       defaultTerms: cleanString(raw.defaultTerms, MAX_LONG),
       defaultPaymentInfo: cleanString(raw.defaultPaymentInfo, MAX_LONG),

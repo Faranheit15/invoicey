@@ -14,6 +14,7 @@ import {
   createInvoiceCsv,
   createInvoiceHtml,
 } from "@/lib/invoice-export";
+import type { InvoicePaymentDetails } from "@/lib/invoice-export";
 import { downloadBlob } from "@/lib/download";
 import {
   buildLineItemColumns,
@@ -27,7 +28,9 @@ import {
   formatDateLong,
   getInvoiceStatus,
 } from "@/lib/invoices";
+import { ShareInvoiceButtons } from "@/components/ShareInvoiceButtons";
 import {
+  CopyIcon,
   DownloadIcon,
   FileIcon,
   Pencil1Icon,
@@ -35,8 +38,16 @@ import {
 
 interface InvoiceModalProps {
   invoice: InvoiceRecord;
+  /**
+   * Payment identity for the UPI QR and the bank block. Passed in rather than
+   * fetched here: the dashboard opens this modal once per invoice, and the
+   * profile is one document per user, so fetching it per open would be one
+   * request per click for a value that never changes between them.
+   */
+  payment?: InvoicePaymentDetails;
   onClose: () => void;
   onEdit?: (invoiceId: string) => void;
+  onDuplicate?: (invoiceId: string) => void;
   onSettle?: (invoiceId: string) => Promise<void> | void;
   onDelete?: (invoiceId: string) => Promise<void> | void;
   isMutating?: boolean;
@@ -44,8 +55,10 @@ interface InvoiceModalProps {
 
 export default function InvoiceModal({
   invoice,
+  payment,
   onClose,
   onEdit,
+  onDuplicate,
   onSettle,
   onDelete,
   isMutating = false,
@@ -103,7 +116,7 @@ export default function InvoiceModal({
     // document print itself too would raise the dialog twice.
     releasePrintFrame();
 
-    const html = createInvoiceHtml(invoice);
+    const html = createInvoiceHtml(invoice, { payment });
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const frame = document.createElement("iframe");
@@ -225,7 +238,7 @@ export default function InvoiceModal({
   const exportHtml = () => {
     downloadBlob(
       `${invoice.invoiceNumber || "invoice"}.html`,
-      createInvoiceHtml(invoice),
+      createInvoiceHtml(invoice, { payment }),
       "text/html;charset=utf-8"
     );
     eventsApi.emit({
@@ -285,6 +298,21 @@ export default function InvoiceModal({
                 Edit
               </Button>
             ) : null}
+            {onDuplicate ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onDuplicate(invoice._id)}
+                disabled={isMutating}
+              >
+                <CopyIcon className="w-4 h-4" />
+                Duplicate
+              </Button>
+            ) : null}
+            <ShareInvoiceButtons
+              invoice={invoice}
+              upiVpa={payment?.upiVpa}
+            />
             {onSettle && status !== "paid" ? (
               <Button
                 size="sm"

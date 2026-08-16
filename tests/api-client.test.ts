@@ -94,6 +94,53 @@ describe("authedFetch", () => {
   });
 });
 
+describe("invoicesApi.page", () => {
+  /**
+   * `list()` and `page()` hit the SAME url; the route only paginates when
+   * `page`/`limit` are present. So the two must not converge: a `page()` that
+   * forgot its params would silently get the unpaginated array back and hand
+   * the table `res.invoices === undefined`.
+   */
+  it("sends the paging, sort and filter params as a query string", async () => {
+    globalThis.fetch = mock(
+      async () =>
+        new Response(
+          JSON.stringify({ invoices: [{ _id: "1" }], page: 2, limit: 25, total: 51 }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    ) as unknown as typeof fetch;
+
+    const body = await invoicesApi.page({
+      page: 2,
+      limit: 25,
+      sort: "dueDate",
+      order: "asc",
+      q: "Nova",
+      status: "overdue",
+    });
+
+    expect(body.total).toBe(51);
+    expect(body.invoices).toHaveLength(1);
+
+    const [url] = (globalThis.fetch as unknown as ReturnType<typeof mock>).mock
+      .calls[0] as [string];
+    const query = new URL(url, "http://localhost").searchParams;
+    expect(url.startsWith("/api/invoices?")).toBe(true);
+    expect(query.get("page")).toBe("2");
+    expect(query.get("limit")).toBe("25");
+    expect(query.get("sort")).toBe("dueDate");
+    expect(query.get("order")).toBe("asc");
+    expect(query.get("q")).toBe("Nova");
+    expect(query.get("status")).toBe("overdue");
+  });
+
+  it("drops empty values rather than sending blanks", async () => {
+    await invoicesApi.page({ page: 1, q: "", status: undefined });
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe("/api/invoices?page=1");
+  });
+});
+
 describe("network failures", () => {
   // fetch only rejects when no response was produced. Those cases used to
   // escape as a raw TypeError, so every `instanceof ApiError` check missed and

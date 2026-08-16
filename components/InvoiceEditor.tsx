@@ -12,9 +12,13 @@ import { SelectField } from "@/components/ui/select-field";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertBanner, LiveStatus } from "@/components/ui/alert-banner";
+import { StickyActionBar } from "@/components/ui/sticky-action-bar";
+import { ValidationSummary } from "@/components/ui/validation-summary";
 import { MicroLabel } from "@/components/ui/micro-label";
 import { PageShell } from "@/components/ui/page-shell";
 import InvoiceAiAssistant from "@/components/InvoiceAiAssistant";
+import ClientPicker from "@/components/ClientPicker";
+import { ConfirmDialog } from "@/components/ui/modal";
 import {
   invoicesApi,
   profileApi,
@@ -23,6 +27,17 @@ import {
   UnauthenticatedError,
   type BusinessProfile,
 } from "@/lib/api-client";
+import type { ClientSummary } from "@/lib/clients";
+import {
+  collectInvoiceIssues,
+  focusFirstInvoiceIssue,
+  type InvoiceIssue,
+} from "@/lib/invoice-field-validation";
+import { useInvoiceDraft } from "@/lib/hooks/use-invoice-draft";
+import { useUnsavedChangesGuard } from "@/lib/hooks/use-unsaved-changes";
+import { UNSAVED_CHANGES_MESSAGE } from "@/lib/navigation-guard";
+import UserSessionManager from "@/modules/UserSessionManager";
+import { buildDuplicateFormState } from "@/lib/invoice-duplicate";
 import type { InvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/contracts";
 import { applyInvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/apply-patch";
 import {
@@ -34,7 +49,6 @@ import {
   buildLineItemColumns,
   buildTotalsRows,
   tdsSpecFor,
-  validateInvoiceDetailed,
   type TdsSection,
 } from "@/lib/invoice-domain";
 import {
@@ -113,6 +127,27 @@ const URL_FIELD_MAX = 2048;
 const MAX_LINE_ITEMS = 100;
 const HSN_FIELD_MAX = 8;
 
+/**
+ * "moments ago" / "4 minutes ago" / "2 days ago", for the draft-restore offer.
+ * Coarse on purpose: the question is "is this recent enough to want back?",
+ * and a to-the-second answer invites reading it as a save receipt.
+ */
+const formatDraftAge = (ageMs: number): string => {
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 1) {
+    return "moments ago";
+  }
+  if (minutes < 60) {
+    return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+};
+
 const STATE_OPTIONS = GST_STATE_PICKER_CODES.map((code) => ({
   value: code,
   label: `${code} — ${GST_STATE_CODES[code]}`,
@@ -178,11 +213,36 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   // banner never offers a retry for something the user has to fix by hand.
   const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null);
   const [saveStatus, setSaveStatus] = useState("");
+  /** Set once a duplicate has landed, so the user knows what they are looking at. */
+  const [duplicateNotice, setDuplicateNotice] = useState("");
+  /**
+   * A chosen client whose details would overwrite something already typed. Held
+   * here rather than applied, until the user says so.
+   */
+  const [pendingClient, setPendingClient] = useState<ClientSummary | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const [signatureLoadFailed, setSignatureLoadFailed] = useState(false);
-  // Non-blocking advice from `validateInvoiceDetailed` — a wrong-LOOKING but
-  // legal invoice must still save, so these are shown, never enforced.
+  // Non-blocking advice from the shared validator — a wrong-LOOKING but legal
+  // invoice must still save, so these are shown, never enforced.
   const [warnings, setWarnings] = useState<string[]>([]);
+  /**
+   * EVERY blocking problem, not just the first. The form is ~2,400px tall on a
+   * phone; one error at a time turns filling in a blank invoice into six
+   * scroll-up-read-scroll-down round trips.
+   */
+  const [issues, setIssues] = useState<InvoiceIssue[]>([]);
+  /**
+   * Mirrors `isPristineRef` as RENDER state. The ref is read inside async
+   * callbacks (where a stale closure would be wrong); the guard and the draft
+   * autosave need a value React can re-render on.
+   */
+  const [isDirty, setIsDirty] = useState(false);
+  /** Firebase uid, for the draft key. Drafts are per-user — see lib/invoice-draft.ts. */
+  const [userId, setUserId] = useState("");
+  /** A navigation the guard stopped, waiting on the confirm dialog. */
+  const [pendingLeave, setPendingLeave] = useState<{ proceed: () => void } | null>(
+    null
+  );
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   /**
    * False the moment the user touches anything. The profile fetch is async and
@@ -192,13 +252,86 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const isPristineRef = useRef(true);
   const markDirty = useCallback(() => {
     isPristineRef.current = false;
+    setIsDirty(true);
   }, []);
+  /**
+   * True from the instant a `?duplicate=` link is recognised until the copy has
+   * either landed or failed. The profile seed reads it AFTER its own await, so
+   * a slow profile fetch cannot land on top of a duplicated draft.
+   */
+  const isDuplicatePendingRef = useRef(false);
   const authRedirectPath = useMemo(() => {
     if (mode === "edit" && invoiceId) {
       return `/auth?next=${encodeURIComponent(`/create-invoice/${invoiceId}`)}`;
     }
     return "/auth?next=%2Fcreate-invoice";
   }, [invoiceId, mode]);
+
+  // The draft key is per-user (a shared machine must not hand one person's
+  // client details to the next), so nothing is stored until the uid resolves.
+  useEffect(() => {
+    setUserId(new UserSessionManager().user?.uid || "");
+  }, []);
+
+  /**
+   * Autosave to localStorage, and offer to restore. Disabled while an existing
+   * invoice is still loading (the placeholder would be written over a real
+   * draft) and while saving.
+   */
+  const { pendingDraft, restoreDraft, discardDraft, clearDraft, savedAt } =
+    useInvoiceDraft({
+      userId,
+      mode,
+      invoiceId,
+      state: invoice,
+      isDirty,
+      enabled: !isLoadingInvoice && !isSaving,
+    });
+
+  /**
+   * Warn before a back gesture, a link, or a tab close throws the form away.
+   * Disabled while saving: the post-save `router.push` is a navigation the user
+   * asked for, and `isSaving` has already rendered by the time it runs.
+   */
+  const { confirmLeave } = useUnsavedChangesGuard({
+    enabled: isDirty && !isSaving,
+    onBlocked: ({ proceed }) => setPendingLeave({ proceed }),
+  });
+
+  /** Every deliberate return to the dashboard goes through the guard. */
+  const leaveForDashboard = useCallback(() => {
+    confirmLeave(() => router.push("/dashboard"), "/dashboard");
+  }, [confirmLeave, router]);
+
+  /**
+   * Which of the two line-item renderings is actually on screen.
+   *
+   * Both are always in the DOM — the table and the cards swap by media query
+   * (see the note above the table) — so stamping `data-invoice-field` on both
+   * would leave `focusFirstInvoiceIssue` focusing whichever comes first in
+   * document order, which is `display:none` half the time. A hidden element
+   * cannot be focused or scrolled to, so the jump would silently do nothing.
+   * The query below is the exact complement of `hidden md:block lg:hidden
+   * xl:block`; it starts false so SSR and first paint stamp the cards.
+   */
+  const [isLineTableVisible, setIsLineTableVisible] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia(
+      "(min-width: 768px) and (max-width: 1023.98px), (min-width: 1280px)"
+    );
+    const sync = () => setIsLineTableVisible(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  const applyPendingDraft = useCallback(() => {
+    const restored = restoreDraft();
+    if (restored) {
+      setInvoice(restored);
+      markDirty();
+    }
+  }, [markDirty, restoreDraft]);
 
   // The whole form goes in: the GST fields are members of `InvoiceFormState`
   // now, and `calculateInvoiceTotals` routes them through the same
@@ -295,6 +428,94 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     fetchInvoice();
   }, [fetchInvoice, mode]);
 
+  /**
+   * DUPLICATE: `/create-invoice?duplicate=<id>` loads that invoice as a NEW
+   * draft — everything carried over except the number, the dates and the status.
+   *
+   * Client-side on purpose (see lib/invoice-duplicate.ts): a duplicate is a
+   * draft, and a server-side copy would both save a document nobody reviewed
+   * and burn a number out of a series Rule 46(b) requires to be consecutive.
+   *
+   * The id is read from `window.location.search` rather than `useSearchParams`,
+   * which would force this whole editor behind a Suspense boundary at build
+   * time — the `/create-invoice` page is a thin server shell with nowhere to put
+   * one, and adding a bailout would opt the route out of static rendering.
+   *
+   * Nothing about the FAILURE path guesses: if the source cannot be read the
+   * user gets an empty form and a message, never a half-copied invoice.
+   */
+  useEffect(() => {
+    if (mode !== "create") {
+      return;
+    }
+    const sourceId = new URLSearchParams(window.location.search).get("duplicate");
+    if (!sourceId) {
+      return;
+    }
+    // Set SYNCHRONOUSLY, before the first await: both effects mount in the same
+    // commit, and this is what the profile seed checks once its fetch resolves.
+    isDuplicatePendingRef.current = true;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const source = await invoicesApi.get(sourceId);
+        const today = new Date();
+
+        // The number comes from the server, which is the only place that can
+        // see the whole series. Advisory: a failure leaves the field EMPTY
+        // rather than reusing the source's number, which would be a duplicate
+        // in the sense the law cares about.
+        let invoiceNumber = "";
+        try {
+          const suggestion = await invoicesApi.suggestNumber(
+            today.toISOString().split("T")[0]
+          );
+          invoiceNumber = suggestion.invoiceNumber ?? "";
+        } catch {
+          invoiceNumber = "";
+        }
+
+        // Whatever the user has typed in the meantime wins — the same rule the
+        // profile seed follows, for the same reason.
+        if (cancelled || !isPristineRef.current) {
+          return;
+        }
+
+        setInvoice(
+          buildDuplicateFormState(mapInvoiceRecordToFormState(source), {
+            invoiceNumber,
+            today,
+          })
+        );
+        // A copied draft is not a pristine one: the profile seed must not land
+        // on top of it if it happens to resolve later.
+        markDirty();
+        setDuplicateNotice(
+          invoiceNumber
+            ? `Copied from ${source.invoiceNumber || "an earlier invoice"}. New number and today's dates — check them, then save.`
+            : `Copied from ${source.invoiceNumber || "an earlier invoice"}. Give it an invoice number before saving.`
+        );
+      } catch (err) {
+        // The duplicate did not happen, so let the profile seed run instead.
+        isDuplicatePendingRef.current = false;
+        if (cancelled || err instanceof UnauthenticatedError) {
+          return;
+        }
+        const { message } = describeRequestError(
+          err,
+          "Couldn't copy that invoice. Start from a blank one instead."
+        );
+        setError(message);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [markDirty, mode]);
+
   useEffect(() => {
     setLogoLoadFailed(false);
   }, [invoice.companyLogo]);
@@ -338,7 +559,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
           return;
         }
         setProfile(saved);
-        if (mode === "create" && isPristineRef.current) {
+        if (
+          mode === "create" &&
+          isPristineRef.current &&
+          // A `?duplicate=` copy is in flight (or has landed): seeding here
+          // would blank the client and line items it just carried over.
+          !isDuplicatePendingRef.current
+        ) {
           setInvoice(createDefaultInvoiceFormState(profileToSeed(saved)));
         }
       } catch {
@@ -387,6 +614,67 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
 
     return appliedFields;
   }, [markDirty]);
+
+  /**
+   * The four fields a saved client fills, with the labels the form uses — so
+   * the confirmation can name exactly what it is about to change rather than
+   * saying "some details".
+   */
+  const clientFieldsFor = (client: ClientSummary) => [
+    { key: "billTo" as const, label: "Client name", value: client.name },
+    { key: "billToEmail" as const, label: "Client email", value: client.email },
+    { key: "billToGstin" as const, label: "Client GSTIN", value: client.gstin },
+    {
+      key: "billToAddress" as const,
+      label: "Client billing address",
+      value: client.address,
+    },
+  ];
+
+  /**
+   * Fill from a saved client. A field the client record has nothing for is left
+   * alone — picking a client whose GSTIN was never recorded must not wipe one
+   * the user has just typed in.
+   */
+  const applyClient = (client: ClientSummary) => {
+    markDirty();
+    setInvoice((prev) => ({
+      ...prev,
+      billTo: client.name || prev.billTo,
+      billToEmail: client.email || prev.billToEmail,
+      billToGstin: client.gstin || prev.billToGstin,
+      billToAddress: client.address || prev.billToAddress,
+    }));
+  };
+
+  /**
+   * The picker's entry point. Filling BLANK fields needs no permission;
+   * replacing a value the user typed is a decision, and it is theirs — so a
+   * conflict opens a dialog naming every field that would change instead of
+   * quietly overwriting them.
+   */
+  const chooseClient = (client: ClientSummary) => {
+    const conflicts = clientFieldsFor(client).filter(
+      (field) =>
+        field.value &&
+        invoice[field.key].trim() &&
+        invoice[field.key].trim() !== field.value
+    );
+    if (conflicts.length === 0) {
+      applyClient(client);
+      return;
+    }
+    setPendingClient(client);
+  };
+
+  const pendingClientConflicts = pendingClient
+    ? clientFieldsFor(pendingClient).filter(
+        (field) =>
+          field.value &&
+          invoice[field.key].trim() &&
+          invoice[field.key].trim() !== field.value
+      )
+    : [];
 
   const updateField = <K extends keyof InvoiceFormState>(
     key: K,
@@ -454,50 +742,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     }
     setError("");
     setErrorRetry(null);
+    setIssues([]);
 
-    // Each check names the one field to fix, so the message maps to a single
-    // place on screen rather than making the user hunt through the form.
-    if (!invoice.companyName.trim()) {
-      showError("Add your company name — it appears at the top of the invoice.");
-      return;
-    }
-
-    if (!invoice.billTo.trim()) {
-      showError("Add a client name so the invoice knows who it is addressed to.");
-      return;
-    }
-
-    if (!invoice.invoiceNumber.trim()) {
-      showError("Give this invoice a number, for example INV-2026-014.");
-      return;
-    }
-
-    if (!invoice.invoiceDate || Number.isNaN(new Date(invoice.invoiceDate).getTime())) {
-      showError("Pick an invoice date.");
-      return;
-    }
-
-    if (!invoice.dueDate || Number.isNaN(new Date(invoice.dueDate).getTime())) {
-      showError("Pick a due date.");
-      return;
-    }
-
-    if (new Date(invoice.dueDate) < new Date(invoice.invoiceDate)) {
-      showError("The due date falls before the invoice date. Check both dates.");
-      return;
-    }
-
-    const validItems = invoice.items.filter((item) => item.description.trim());
-    if (validItems.length === 0) {
-      showError("Add at least one line item with a description.");
-      return;
-    }
-
-    // The shared validator, on exactly the shape the API will validate. The
-    // hand-written checks above stay because each of them names the ONE field to
-    // fix in the editor's own words; this adds the GST rules and the derivation
-    // tripwires, and returns the warnings the fields cannot express.
-    const validation = validateInvoiceDetailed({
+    // ONE validate-all pass. `collectInvoiceIssues` re-runs the shared
+    // `validateInvoiceDetailed` — the same rules the API enforces, in the same
+    // order — until it has enumerated every blocking error, so the seven
+    // hand-rolled pre-checks that used to live here cannot drift from it.
+    const report = collectInvoiceIssues({
       companyName: invoice.companyName,
       billTo: invoice.billTo,
       invoiceNumber: invoice.invoiceNumber,
@@ -517,8 +768,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       countryOfDestination: invoice.countryOfDestination,
       totals: { cgst: totals.cgst, sgst: totals.sgst, igst: totals.igst },
     });
-    if (validation.error) {
-      showError(validation.error);
+
+    setIssues(report.issues);
+    setWarnings(report.warnings);
+    if (!report.isValid) {
+      // Scroll to and focus the first control at fault; the summary lists the
+      // rest, each one its own jump target.
+      focusFirstInvoiceIssue(report.issues);
       return;
     }
 
@@ -532,11 +788,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       taxTreatment: invoice.taxTreatment,
     });
     if (stateError) {
-      showError(stateError);
+      setIssues([{ field: "supplierStateCode", message: stateError }]);
+      focusFirstInvoiceIssue([{ field: "supplierStateCode", message: stateError }]);
       return;
     }
 
-    setWarnings(validation.warnings);
 
     const runSave = async () => {
       try {
@@ -555,7 +811,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
         }
 
         setSaveStatus("Saved. Returning to dashboard.");
-        router.push("/dashboard");
+        // The invoice is on the server now; the local copy of the client's
+        // name, email and address has no reason to outlive it.
+        clearDraft();
+        setIsDirty(false);
+        isPristineRef.current = true;
+        confirmLeave(() => router.push("/dashboard"), "/dashboard");
       } catch (err) {
         setSaveStatus("");
         if (err instanceof UnauthenticatedError) {
@@ -596,7 +857,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
    * the fields anyway is how a document ends up shaped like a tax invoice
    * without being one.
    */
-  const renderLineGstFields = (item: InvoiceFormItem, index: number) => (
+  const renderLineGstFields = (
+    item: InvoiceFormItem,
+    index: number,
+    /** Stamp the focus target only on the rendering that is on screen. */
+    isStamped: boolean
+  ) => (
     <div className="grid gap-2 rounded-md border border-dashed border-slate-200 bg-slate-50/70 p-2 sm:grid-cols-2 lg:grid-cols-4 dark:border-slate-700 dark:bg-slate-800/50">
       {isGst ? (
         <Field label="HSN/SAC">
@@ -604,6 +870,9 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             <Input
               {...field}
               inputMode="numeric"
+              data-invoice-field={
+                isStamped ? `items.${index}.hsnSac` : undefined
+              }
               maxLength={HSN_FIELD_MAX}
               placeholder="998314"
               value={item.hsnSac ?? ""}
@@ -757,7 +1026,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             <Button
               type="button"
               variant="ghost"
-              onClick={() => router.push("/dashboard")}
+              onClick={leaveForDashboard}
               className="h-auto p-0 text-sm font-normal text-slate-600 hover:bg-transparent hover:text-slate-900 dark:text-slate-300 dark:hover:bg-transparent dark:hover:text-white"
             >
               <ArrowLeftIcon className="w-4 h-4" />
@@ -782,18 +1051,20 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 {isAiPanelVisible ? "Hide AI Assistant" : "Show AI Assistant"}
               </Button>
             ) : null}
+            {/* Desktop only. Below md these two live in the StickyActionBar at
+                the bottom of the form, where the user actually finishes. */}
             <Button
               variant="outline"
               disabled={isSaving}
               onClick={() => saveInvoice("draft")}
-              className="w-full sm:w-auto"
+              className="hidden w-full sm:w-auto md:inline-flex"
             >
               Save Draft
             </Button>
             <Button
               disabled={isSaving}
               onClick={() => saveInvoice("sent")}
-              className="w-full sm:w-auto"
+              className="hidden w-full sm:w-auto md:inline-flex"
             >
               {isSaving ? (
                 <>
@@ -822,9 +1093,47 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
 
         <LiveStatus>{saveStatus}</LiveStatus>
 
+        {/* Every blocking problem at once, each one a jump to its own field —
+            rather than one error at a time at the top of a 2,400px form. */}
+        <ValidationSummary issues={issues} className="mb-4" />
+
         {error ? (
           <AlertBanner className="mb-4" onRetry={errorRetry ?? undefined}>
             {error}
+          </AlertBanner>
+        ) : null}
+
+        {/* A draft is OFFERED, never applied silently: the user may have
+            abandoned it deliberately, and overwriting a freshly loaded invoice
+            with a stale draft is the one failure worse than losing it. */}
+        {pendingDraft ? (
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
+            <p className="min-w-0 flex-1">
+              You have unsaved work on this invoice from{" "}
+              {formatDraftAge(pendingDraft.ageMs)}. Restore it?
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" size="sm" onClick={applyPendingDraft}>
+                Restore
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={discardDraft}
+              >
+                Discard
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Says plainly that this form was pre-filled from another invoice, and
+            which one. A duplicate that arrives silently is indistinguishable
+            from an editor that failed to clear itself. */}
+        {duplicateNotice ? (
+          <AlertBanner tone="success" className="mb-4">
+            {duplicateNotice}
           </AlertBanner>
         ) : null}
 
@@ -863,6 +1172,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     {(field) => (
                       <Input
                         {...field}
+                        data-invoice-field="companyName"
                         maxLength={TEXT_FIELD_MAX}
                         placeholder="Acme Studio"
                         value={invoice.companyName}
@@ -916,6 +1226,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     {(field) => (
                       <Input
                         {...field}
+                        data-invoice-field="companyGstin"
                         maxLength={15}
                         placeholder="27AAPFU0939F1ZV"
                         value={invoice.companyGstin}
@@ -1001,14 +1312,21 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               </section>
 
               <section className="space-y-3">
-                <MicroLabel as="h2" variant="section">
-                  Client
-                </MicroLabel>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <MicroLabel as="h2" variant="section">
+                    Client
+                  </MicroLabel>
+                  {/* The client half of the product's memory. Derived from this
+                      user's own invoices, so it needs no setup and is empty
+                      only for someone who has never sent anything. */}
+                  <ClientPicker onSelect={chooseClient} disabled={isSaving} />
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Client name">
                     {(field) => (
                       <Input
                         {...field}
+                        data-invoice-field="billTo"
                         maxLength={TEXT_FIELD_MAX}
                         placeholder="Nova Health Pvt Ltd"
                         value={invoice.billTo}
@@ -1041,6 +1359,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     {(field) => (
                       <Input
                         {...field}
+                        data-invoice-field="billToGstin"
                         maxLength={15}
                         placeholder="29AAGCB7383J1Z4"
                         value={invoice.billToGstin}
@@ -1078,6 +1397,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     {(field) => (
                       <Input
                         {...field}
+                        data-invoice-field="invoiceNumber"
                         maxLength={INVOICE_NUMBER_MAX}
                         placeholder="INV-2026-014"
                         value={invoice.invoiceNumber}
@@ -1092,6 +1412,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       <DatePickerField
                         {...field}
                         aria-labelledby={`${labelId} ${field.id}`}
+                        data-invoice-field="invoiceDate"
                         value={invoice.invoiceDate}
                         onValueChange={(value) => updateField("invoiceDate", value)}
                         placeholder="Pick a date"
@@ -1103,6 +1424,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       <DatePickerField
                         {...field}
                         aria-labelledby={`${labelId} ${field.id}`}
+                        data-invoice-field="dueDate"
                         value={invoice.dueDate}
                         onValueChange={(value) => updateField("dueDate", value)}
                         placeholder="Pick a date"
@@ -1203,6 +1525,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                         <div className="grid grid-cols-[minmax(0,1.6fr)_84px_120px_112px_40px] items-center gap-2">
                           <Input
                             aria-label={`Line ${index + 1} description`}
+                            data-invoice-field={
+                              isLineTableVisible
+                                ? `items.${index}.description`
+                                : undefined
+                            }
                             maxLength={TEXT_FIELD_MAX}
                             placeholder="e.g. Monthly retainer"
                             value={item.description}
@@ -1246,7 +1573,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                             <TrashIcon className="w-4 h-4 text-slate-500 dark:text-slate-300" />
                           </Button>
                         </div>
-                        {renderLineGstFields(item, index)}
+                        {renderLineGstFields(item, index, isLineTableVisible)}
                         </div>
                       ))}
                     </div>
@@ -1263,6 +1590,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                             {(field) => (
                               <Input
                                 {...field}
+                                data-invoice-field={
+                                  isLineTableVisible
+                                    ? undefined
+                                    : `items.${index}.description`
+                                }
                                 maxLength={TEXT_FIELD_MAX}
                                 placeholder="e.g. Monthly retainer"
                                 value={item.description}
@@ -1302,7 +1634,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                               )}
                             </Field>
                           </div>
-                          {renderLineGstFields(item, index)}
+                          {renderLineGstFields(item, index, !isLineTableVisible)}
                         </div>
                         <div className="mt-3 flex items-center justify-between text-sm">
                           <span className="text-slate-500 dark:text-slate-300">Amount</span>
@@ -1482,6 +1814,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       <SelectField
                         {...field}
                         aria-labelledby={`${labelId} ${field.id}`}
+                        data-invoice-field="supplierStateCode"
                         value={invoice.supplierStateCode}
                         onValueChange={(value) => {
                           markDirty();
@@ -1515,6 +1848,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       <SelectField
                         {...field}
                         aria-labelledby={`${labelId} ${field.id}`}
+                        data-invoice-field="placeOfSupplyStateCode"
                         value={invoice.placeOfSupplyStateCode}
                         onValueChange={(value) => {
                           markDirty();
@@ -1586,6 +1920,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                           {(field) => (
                             <Input
                               {...field}
+                              data-invoice-field="countryOfDestination"
                               maxLength={TEXT_FIELD_MAX}
                               placeholder="United States"
                               value={invoice.countryOfDestination}
@@ -1605,6 +1940,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                           {(field) => (
                             <Input
                               {...field}
+                              data-invoice-field="lutArn"
                               maxLength={60}
                               placeholder="AD290123456789A"
                               value={invoice.lutArn}
@@ -2045,7 +2381,96 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             </CardContent>
           </Card>
         </div>
+
+        {/* The same two actions as the header, pinned to the bottom of the
+            viewport below md. Filling the last field and then scrolling the
+            whole form back up to save is the problem this removes. */}
+        <StickyActionBar
+          status={
+            issues.length
+              ? `${issues.length} ${
+                  issues.length === 1 ? "thing" : "things"
+                } to fix before saving — see the list above.`
+              : isDirty && savedAt
+                ? "Draft saved on this device."
+                : null
+          }
+        >
+          <Button
+            variant="outline"
+            disabled={isSaving}
+            onClick={() => saveInvoice("draft")}
+            className="flex-1"
+          >
+            Save Draft
+          </Button>
+          <Button
+            disabled={isSaving}
+            onClick={() => saveInvoice("sent")}
+            className="flex-1"
+          >
+            {isSaving ? (
+              <>
+                <ReloadIcon className="w-4 h-4 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <CheckIcon className="w-4 h-4" />
+                {mode === "edit" ? "Update Invoice" : "Create Invoice"}
+              </>
+            )}
+          </Button>
+        </StickyActionBar>
       </div>
+
+      {/* Unsaved work is never thrown away without asking. `beforeunload`
+          covers a tab close with the browser's own wording; this covers the
+          back gesture and every in-app link. */}
+      <ConfirmDialog
+        open={Boolean(pendingLeave)}
+        title="Leave without saving?"
+        description={UNSAVED_CHANGES_MESSAGE}
+        confirmLabel="Leave"
+        cancelLabel="Stay on this page"
+        onConfirm={() => {
+          const leave = pendingLeave;
+          setPendingLeave(null);
+          leave?.proceed();
+        }}
+        onCancel={() => setPendingLeave(null)}
+      />
+
+      {/* The picker never overwrites typed work on its own. This is the
+          "explicit choice" — and it names every field it is about to change,
+          because "replace client details?" is not enough to answer with. */}
+      <ConfirmDialog
+        open={Boolean(pendingClient)}
+        tone="default"
+        title="Replace the client details you've typed?"
+        description={
+          <>
+            <strong className="font-semibold text-slate-800 dark:text-slate-100">
+              {pendingClient?.name || "This client"}
+            </strong>{" "}
+            has different details on file. Continuing overwrites:
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              {pendingClientConflicts.map((field) => (
+                <li key={field.key}>{field.label}</li>
+              ))}
+            </ul>
+          </>
+        }
+        confirmLabel="Replace details"
+        cancelLabel="Keep what I typed"
+        onConfirm={() => {
+          if (pendingClient) {
+            applyClient(pendingClient);
+          }
+          setPendingClient(null);
+        }}
+        onCancel={() => setPendingClient(null)}
+      />
     </PageShell>
   );
 }

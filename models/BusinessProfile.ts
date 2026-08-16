@@ -58,6 +58,23 @@ export interface BusinessProfileFields {
   /** LUT ARN, for zero-rated exports/SEZ supplies without payment of tax. */
   lutArn?: string;
 
+  /**
+   * How the client actually pays. Structured, not free text, because the
+   * exporter turns these into a printed bank block and a UPI QR, and both need
+   * to know which value is which. The existing `defaultPaymentInfo` blob stays
+   * — it is where anything that is not one of these five things goes.
+   *
+   * `upiVpa` is validated (`lib/upi.ts`) before it is stored: an invalid VPA
+   * produces a QR that fails inside the client's banking app, which is worse
+   * than printing no QR. Nothing here is a payment integration — the URI is
+   * built offline and the client's own bank moves the money.
+   */
+  upiVpa?: string;
+  bankAccountName?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
+  bankName?: string;
+
   // Invoice defaults.
   defaultCurrency?: string;
   defaultTerms?: string;
@@ -97,6 +114,12 @@ const BusinessProfileSchema: Schema = new Schema(
       // No `default` on purpose — see D5 above.
     },
     lutArn: { type: String, trim: true, default: "" },
+
+    upiVpa: { type: String, lowercase: true, trim: true, default: "" },
+    bankAccountName: { type: String, default: "" },
+    bankAccountNumber: { type: String, trim: true, default: "" },
+    bankIfsc: { type: String, uppercase: true, trim: true, default: "" },
+    bankName: { type: String, default: "" },
 
     defaultCurrency: { type: String, default: "INR" },
     defaultTerms: { type: String, default: "" },

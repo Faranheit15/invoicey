@@ -2,6 +2,10 @@ import { loadFirebaseAuth } from "@/lib/firebase-lazy";
 import { requiresEmailVerification } from "@/lib/auth-client";
 import type { User } from "firebase/auth";
 import type { InvoiceRecord, InvoicePayload } from "@/lib/invoices";
+import type { ClientDirectoryResponse } from "@/lib/clients";
+// Type-only, like the BusinessProfile import below: the route module it lives
+// in pulls mongoose, and a value import would ship the driver to the browser.
+import type { InvoiceNumberSuggestion } from "@/app/api/invoices/route";
 import type { ClientEventInput } from "@/lib/logs";
 import type { FeedbackInput, FeedbackRecord } from "@/lib/feedback";
 // `import type` is load-bearing: @/models/BusinessProfile imports mongoose, and
@@ -198,6 +202,17 @@ export interface SaveInvoiceResponse {
 
 export const invoicesApi = {
   list: () => authedFetch<InvoiceRecord[]>("/api/invoices"),
+  /**
+   * One page of the list, with the matching total. The route only paginates
+   * when `page`/`limit` are present, so `list()` above keeps its array shape.
+   */
+  page: (params: QueryParams = {}) =>
+    authedFetch<{
+      invoices: InvoiceRecord[];
+      page: number;
+      limit: number;
+      total: number;
+    }>(`/api/invoices${buildQuery(params)}`),
   get: (id: string) => authedFetch<InvoiceRecord>(withId("/api/invoices", id)),
   create: (payload: InvoicePayload) =>
     authedFetch<SaveInvoiceResponse>("/api/invoices", {
@@ -214,6 +229,27 @@ export const invoicesApi = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  /**
+   * The next number in this user's series for the financial year `date` falls
+   * in. Read-only — nothing is written and no counter moves, so calling it for
+   * a draft the user then abandons leaves no gap in the series.
+   */
+  suggestNumber: (date?: string) =>
+    authedFetch<InvoiceNumberSuggestion>(
+      `/api/invoices${buildQuery({ suggest_number: 1, date })}`
+    ),
+};
+
+/**
+ * The clients this user has invoiced, derived from their own invoice history.
+ *
+ * Read-only by design: there is no clients collection to write to. See
+ * `lib/clients.ts`. `q` filters, `page`/`limit` paginate (the endpoint clamps
+ * both), and the response says when the scan window truncated the directory.
+ */
+export const clientsApi = {
+  list: (params: QueryParams = {}) =>
+    authedFetch<ClientDirectoryResponse>(`/api/clients${buildQuery(params)}`),
 };
 
 export const aiApi = {

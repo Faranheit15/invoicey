@@ -449,6 +449,7 @@ export const calculateInvoiceTotals = (
     sgst: number;
     discount: number;
     convenienceCharge: number;
+    currency?: string;
   } & Partial<InvoiceGstFormFields> &
     Partial<Pick<InvoiceIdentityFields, "tdsSection" | "tdsRatePercent">>
 ) =>
@@ -456,6 +457,7 @@ export const calculateInvoiceTotals = (
     items: form.items,
     discount: form.discount,
     convenienceCharge: form.convenienceCharge,
+    currency: form.currency,
     tds: {
       section: form.tdsSection,
       ratePercent: form.tdsRatePercent,

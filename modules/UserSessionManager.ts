@@ -2,6 +2,7 @@
 
 import Cookies from "js-cookie";
 import { normalizeAvatarUrl, sanitizeProviderId } from "@/lib/user-profile";
+import { clearAllInvoiceDrafts } from "@/lib/invoice-draft";
 
 interface UserData {
   uid: string;
@@ -148,6 +149,16 @@ export default class UserSessionManager {
 
   // Clear all localStorage and cookies
   clearLocal = () => {
+    // Explicit, and FIRST: an editor draft holds the client's name, email,
+    // billing address and amounts — DPDP personal data sitting unencrypted on a
+    // possibly shared machine. `localStorage.clear()` below happens to remove
+    // them today, but an incidental clear is one refactor away from a privacy
+    // regression, so the guarantee is stated rather than inherited.
+    try {
+      clearAllInvoiceDrafts(localStorage);
+    } catch (e) {
+      console.log("An error occurred while clearing invoice drafts:", e);
+    }
     localStorage.clear();
     Cookies.remove(this.keys.sessionId);
     Cookies.remove(this.keys.sessionToken);

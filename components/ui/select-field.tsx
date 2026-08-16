@@ -26,6 +26,18 @@ interface SelectFieldProps {
   id?: string;
   "aria-labelledby"?: string;
   "aria-describedby"?: string;
+  /**
+   * For a select with no visible <label> (a filter bar control whose meaning is
+   * carried by its own selected value). `Field`-wrapped selects keep using
+   * `aria-labelledby`, which is what makes them announce "Currency INR" rather
+   * than replacing the trigger text.
+   */
+  "aria-label"?: string;
+  /**
+   * Focus target for `focusFirstInvoiceIssue`. `Field` generates its ids with
+   * `useId()`, so a data attribute is the only stable handle on a control.
+   */
+  "data-invoice-field"?: string;
 }
 
 export function SelectField({
@@ -38,6 +50,8 @@ export function SelectField({
   id,
   "aria-labelledby": ariaLabelledBy,
   "aria-describedby": ariaDescribedBy,
+  "aria-label": ariaLabel,
+  "data-invoice-field": dataInvoiceField,
 }: SelectFieldProps) {
   const selectedOption = options.find((option) => option.value === value);
 
@@ -50,6 +64,8 @@ export function SelectField({
           id={id}
           aria-labelledby={ariaLabelledBy}
           aria-describedby={ariaDescribedBy}
+          aria-label={ariaLabel}
+          data-invoice-field={dataInvoiceField}
           className={cn(
             "h-10 w-full justify-between px-3 py-2 text-sm font-normal",
             className

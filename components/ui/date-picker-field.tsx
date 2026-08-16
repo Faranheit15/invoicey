@@ -37,6 +37,8 @@ interface DatePickerFieldProps {
   id?: string;
   "aria-labelledby"?: string;
   "aria-describedby"?: string;
+  /** Focus target for `focusFirstInvoiceIssue` — see components/ui/select-field.tsx. */
+  "data-invoice-field"?: string;
 }
 
 const parseDateValue = (value: string): Date | undefined => {
@@ -73,6 +75,7 @@ export function DatePickerField({
   id,
   "aria-labelledby": ariaLabelledBy,
   "aria-describedby": ariaDescribedBy,
+  "data-invoice-field": dataInvoiceField,
 }: DatePickerFieldProps) {
   const [open, setOpen] = React.useState(false);
   const selectedDate = React.useMemo(() => parseDateValue(value), [value]);
@@ -87,6 +90,7 @@ export function DatePickerField({
           id={id}
           aria-labelledby={ariaLabelledBy}
           aria-describedby={ariaDescribedBy}
+          data-invoice-field={dataInvoiceField}
           className={cn(
             "h-10 w-full justify-start text-left font-normal",
             !selectedDate && "text-muted-foreground",

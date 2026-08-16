@@ -19,6 +19,14 @@ import {
   stateCodeFromGstin,
 } from "@/lib/gstin";
 import { CURRENCY_OPTIONS } from "@/lib/invoices";
+import {
+  isValidAccountNumber,
+  isValidIfsc,
+  isValidVpa,
+  normalizeAccountNumber,
+  normalizeIfsc,
+  normalizeVpa,
+} from "@/lib/upi";
 
 const MAX_DUE_DAYS = 365;
 
@@ -79,6 +87,28 @@ export function BusinessProfileForm({
 
   const isComposition = form.taxTreatment === "composition";
 
+  // Payment identity. Same posture as the GSTIN: normalise what a paste brings
+  // in, and complain only about a value that is wrong rather than merely empty.
+  // A mistyped VPA is worth arguing about because its failure is invisible here
+  // and visible to the CLIENT — it becomes a QR that dies inside their banking
+  // app, so the form refuses to save one.
+  const upiVpa = normalizeVpa(form.upiVpa);
+  const upiError =
+    upiVpa.length > 0 && !isValidVpa(upiVpa)
+      ? "That doesn't look like a UPI ID. It should be yourname@bank."
+      : "";
+  const bankIfsc = normalizeIfsc(form.bankIfsc);
+  const ifscError =
+    bankIfsc.length > 0 && !isValidIfsc(bankIfsc)
+      ? "That doesn't look like an IFSC. It should be like HDFC0000123."
+      : "";
+  const bankAccountNumber = normalizeAccountNumber(form.bankAccountNumber);
+  const accountError =
+    bankAccountNumber.length > 0 && !isValidAccountNumber(bankAccountNumber)
+      ? "An account number is 6 to 20 digits."
+      : "";
+  const paymentError = Boolean(upiError || ifscError || accountError);
+
   const currencyOptions = useMemo(
     () => CURRENCY_OPTIONS.map((code) => ({ value: code, label: code })),
     []
@@ -88,6 +118,9 @@ export function BusinessProfileForm({
     event.preventDefault();
     onSave({
       ...form,
+      upiVpa,
+      bankIfsc,
+      bankAccountNumber,
       companyGstin: gstin,
       supplierStateCode: effectiveStateCode,
       companyPan: derivedPan || form.companyPan,
@@ -390,6 +423,129 @@ export function BusinessProfileForm({
 
       <Card className={cardClass}>
         <CardHeader className="pb-2">
+          <CardTitle className={titleClass}>How clients pay you</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className={helpClass}>
+            A UPI ID prints a scannable QR code on every invoice you export in
+            rupees. Your client scans it with their own banking app and pays you
+            directly — no money and no fee passes through Invoicey, and nothing
+            here is charged to anyone automatically.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="UPI ID"
+              optional
+              hint={
+                upiError ? (
+                  <span className="text-rose-600 dark:text-rose-300">
+                    {upiError}
+                  </span>
+                ) : (
+                  "Shown as a QR on INR invoices only."
+                )
+              }
+            >
+              {(control) => (
+                <Input
+                  {...control}
+                  value={form.upiVpa}
+                  onChange={(event) => update("upiVpa", event.target.value)}
+                  aria-invalid={upiError ? true : undefined}
+                  placeholder="yourname@okhdfcbank"
+                  className={
+                    upiError
+                      ? "border-rose-400 dark:border-rose-400/60"
+                      : undefined
+                  }
+                />
+              )}
+            </Field>
+            <Field label="Bank name" optional>
+              {(control) => (
+                <Input
+                  {...control}
+                  value={form.bankName}
+                  onChange={(event) => update("bankName", event.target.value)}
+                  placeholder="HDFC Bank"
+                />
+              )}
+            </Field>
+            <Field label="Account name" optional>
+              {(control) => (
+                <Input
+                  {...control}
+                  value={form.bankAccountName}
+                  onChange={(event) =>
+                    update("bankAccountName", event.target.value)
+                  }
+                  placeholder="Acme Consulting"
+                />
+              )}
+            </Field>
+            <Field
+              label="Account number"
+              optional
+              hint={
+                accountError ? (
+                  <span className="text-rose-600 dark:text-rose-300">
+                    {accountError}
+                  </span>
+                ) : undefined
+              }
+            >
+              {(control) => (
+                <Input
+                  {...control}
+                  value={form.bankAccountNumber}
+                  onChange={(event) =>
+                    update("bankAccountNumber", event.target.value)
+                  }
+                  aria-invalid={accountError ? true : undefined}
+                  inputMode="numeric"
+                  placeholder="0000 0000 0000"
+                  className={
+                    accountError
+                      ? "border-rose-400 dark:border-rose-400/60"
+                      : undefined
+                  }
+                />
+              )}
+            </Field>
+            <Field
+              label="IFSC"
+              optional
+              hint={
+                ifscError ? (
+                  <span className="text-rose-600 dark:text-rose-300">
+                    {ifscError}
+                  </span>
+                ) : undefined
+              }
+            >
+              {(control) => (
+                <Input
+                  {...control}
+                  value={form.bankIfsc}
+                  onChange={(event) =>
+                    update("bankIfsc", event.target.value.toUpperCase())
+                  }
+                  aria-invalid={ifscError ? true : undefined}
+                  placeholder="HDFC0000123"
+                  className={
+                    ifscError
+                      ? "border-rose-400 dark:border-rose-400/60"
+                      : undefined
+                  }
+                />
+              )}
+            </Field>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className={cardClass}>
+        <CardHeader className="pb-2">
           <CardTitle className={titleClass}>Signature</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -423,7 +579,10 @@ export function BusinessProfileForm({
       </Card>
 
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={isSaving || Boolean(gstinError)}>
+        <Button
+          type="submit"
+          disabled={isSaving || Boolean(gstinError) || paymentError}
+        >
           {isSaving ? "Saving…" : "Save profile"}
         </Button>
         <p className="text-xs text-slate-500 dark:text-slate-400">

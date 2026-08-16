@@ -19,17 +19,36 @@ import {
   InvoiceCardList,
   InvoiceRowActions,
 } from "@/components/InvoiceList";
-import { STATUS_PILL_BASE, statusPillClass } from "@/lib/invoice-status";
+import { InvoiceFilterBar } from "@/components/dashboard/invoice-filter-bar";
+import { Pagination } from "@/components/ui/pagination";
+import {
+  STATUS_PILL_BASE,
+  resolveDisplayStatus,
+  statusPillClass,
+} from "@/lib/invoice-status";
 import {
   invoicesApi,
+  profileApi,
   describeRequestError,
   UnauthenticatedError,
+  type QueryParams,
 } from "@/lib/api-client";
+import type { InvoicePaymentDetails } from "@/lib/invoice-export";
+import {
+  DEFAULT_INVOICE_ORDER,
+  DEFAULT_INVOICE_SORT,
+  INVOICE_PAGE_SIZE,
+  isInvoiceListFiltered,
+  type InvoiceListState,
+  type InvoiceSortField,
+  type InvoiceStatusFilter,
+  type SortOrder,
+} from "@/lib/dashboard-query";
+import { useServerTable } from "@/lib/hooks/use-server-table";
 import {
   InvoiceRecord,
   formatCurrency,
   formatDateLong,
-  getInvoiceStatus,
 } from "@/lib/invoices";
 
 const DASHBOARD_AUTH_PATH = "/auth?next=%2Fdashboard";
@@ -41,9 +60,19 @@ export default function DashboardPage() {
   const router = useRouter();
 
   const [user, setUser] = useState<{ name?: string } | null>(null);
-  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
+  /**
+   * The WHOLE account, for the summary cards only.
+   *
+   * The table below is paginated now, so its rows are one page of at most
+   * INVOICE_PAGE_SIZE and are also narrowed by whatever filter is active. A
+   * "total outstanding" computed from that would change every time the user
+   * turned a page — a number that moves when you paginate is worse than no
+   * number. So the cards keep their own unpaginated read (`invoicesApi.list()`,
+   * unchanged), and the table gets its own paged one.
+   */
+  const [summaryInvoices, setSummaryInvoices] = useState<InvoiceRecord[]>([]);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [canRetryLoad, setCanRetryLoad] = useState(false);
   const [notice, setNotice] = useState("");
@@ -57,22 +86,63 @@ export default function DashboardPage() {
     setUser(userSessionManager.user || null);
   }, []);
 
-  const fetchInvoices = useCallback(async () => {
+  /**
+   * True when the failure was "you are not signed in", after starting the
+   * redirect. Callers stop rather than rendering an error the user cannot act
+   * on from a page they are about to leave.
+   */
+  const handleAuthFailure = useCallback(
+    (error: unknown, verifyMessage: string): boolean => {
+      if (!(error instanceof UnauthenticatedError)) {
+        return false;
+      }
+      if (error.reason === "verify-email") {
+        setLoadError(verifyMessage);
+        router.replace(`${DASHBOARD_AUTH_PATH}&reason=verify-email`);
+      } else {
+        router.replace(DASHBOARD_AUTH_PATH);
+      }
+      return true;
+    },
+    [router]
+  );
+
+  // Fetched once for the whole dashboard rather than per modal open: it is one
+  // document per user and it does not change between invoices. A failure is
+  // silent on purpose — a missing UPI block must not stop an invoice opening.
+  const [payment, setPayment] = useState<InvoicePaymentDetails | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+    void profileApi
+      .get()
+      .then(({ profile }) => {
+        if (cancelled || !profile) return;
+        setPayment({
+          upiVpa: profile.upiVpa,
+          payeeName: profile.companyName,
+          bankName: profile.bankName,
+          bankAccountName: profile.bankAccountName,
+          bankAccountNumber: profile.bankAccountNumber,
+          bankIfsc: profile.bankIfsc,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fetchSummary = useCallback(async () => {
     try {
-      setIsLoading(true);
+      setIsSummaryLoading(true);
       setLoadError("");
       setCanRetryLoad(false);
 
       const data = await invoicesApi.list();
-      setInvoices(data || []);
+      setSummaryInvoices(data || []);
     } catch (error) {
-      if (error instanceof UnauthenticatedError) {
-        if (error.reason === "verify-email") {
-          setLoadError("Verify your email to reach your dashboard.");
-          router.replace(`${DASHBOARD_AUTH_PATH}&reason=verify-email`);
-        } else {
-          router.replace(DASHBOARD_AUTH_PATH);
-        }
+      if (handleAuthFailure(error, "Verify your email to reach your dashboard.")) {
         return;
       }
       const { message, canRetry } = describeRequestError(
@@ -81,15 +151,90 @@ export default function DashboardPage() {
       );
       setLoadError(message);
       setCanRetryLoad(canRetry);
-      setInvoices([]);
+      setSummaryInvoices([]);
     } finally {
-      setIsLoading(false);
+      setIsSummaryLoading(false);
     }
-  }, [router]);
+  }, [handleAuthFailure]);
 
   useEffect(() => {
-    fetchInvoices();
-  }, [fetchInvoices]);
+    fetchSummary();
+  }, [fetchSummary]);
+
+  /**
+   * One page of rows. The redirect on an expired session happens here rather
+   * than in the hook, which only knows how to turn an error into a message.
+   */
+  const fetchInvoicePage = useCallback(
+    async (params: QueryParams) => {
+      try {
+        const response = await invoicesApi.page(params);
+        return { data: response.invoices, total: response.total };
+      } catch (error) {
+        handleAuthFailure(error, "Verify your email to reach your dashboard.");
+        throw error;
+      }
+    },
+    [handleAuthFailure]
+  );
+
+  const table = useServerTable<InvoiceRecord>({
+    fetcher: fetchInvoicePage,
+    initialSort: DEFAULT_INVOICE_SORT,
+    pageSize: INVOICE_PAGE_SIZE,
+  });
+
+  const { refetch: refetchTable, setSearch, setFilters } = table;
+
+  /**
+   * The filter bar's shape, read back off the hook so there is only one copy of
+   * the state. Sort and order ride in `filters` rather than the hook's own
+   * `setSort`, which can only toggle a direction it chose itself — the bar
+   * offers "Due date (soonest)" and "Due date (latest)" as separate choices.
+   */
+  const listState: InvoiceListState = useMemo(
+    () => ({
+      search: table.search,
+      status: (table.filters.status as InvoiceStatusFilter | undefined) || "",
+      sort:
+        (table.filters.sort as InvoiceSortField | undefined) ||
+        DEFAULT_INVOICE_SORT,
+      order: (table.filters.order as SortOrder | undefined) || DEFAULT_INVOICE_ORDER,
+      page: table.page,
+      pageSize: table.pageSize,
+    }),
+    [table.filters, table.page, table.pageSize, table.search]
+  );
+
+  const changeListState = useCallback(
+    (next: Partial<InvoiceListState>) => {
+      if (next.search !== undefined) {
+        setSearch(next.search);
+      }
+      if (
+        next.status !== undefined ||
+        next.sort !== undefined ||
+        next.order !== undefined
+      ) {
+        setFilters({
+          ...(next.status !== undefined
+            ? { status: next.status || undefined }
+            : { status: listState.status || undefined }),
+          sort: next.sort ?? listState.sort,
+          order: next.order ?? listState.order,
+        });
+      }
+    },
+    [listState.order, listState.sort, listState.status, setFilters, setSearch]
+  );
+
+  const isFiltered = isInvoiceListFiltered(listState);
+
+  /** Both reads: the page the user is looking at, and the account-wide totals. */
+  const refreshAll = useCallback(() => {
+    refetchTable();
+    void fetchSummary();
+  }, [fetchSummary, refetchTable]);
 
   const patchInvoice = useCallback(
     async (invoiceId: string, payload: Record<string, string>) => {
@@ -102,13 +247,7 @@ export default function DashboardPage() {
         await invoicesApi.patch(invoiceId, payload);
         return true;
       } catch (error) {
-        if (error instanceof UnauthenticatedError) {
-          if (error.reason === "verify-email") {
-            setLoadError("Verify your email before managing invoices.");
-            router.replace(`${DASHBOARD_AUTH_PATH}&reason=verify-email`);
-          } else {
-            router.replace(DASHBOARD_AUTH_PATH);
-          }
+        if (handleAuthFailure(error, "Verify your email before managing invoices.")) {
           return false;
         }
         const { message } = describeRequestError(
@@ -121,7 +260,7 @@ export default function DashboardPage() {
         setActiveActionInvoiceId(null);
       }
     },
-    [router]
+    [handleAuthFailure]
   );
 
   const settleInvoice = async (invoiceId: string) => {
@@ -129,7 +268,7 @@ export default function DashboardPage() {
     if (ok) {
       setSelectedInvoice(null);
       setNotice("Marked as paid.");
-      await fetchInvoices();
+      refreshAll();
     }
   };
 
@@ -144,9 +283,25 @@ export default function DashboardPage() {
     if (ok) {
       setSelectedInvoice(null);
       setNotice(`${target.invoiceNumber || "Invoice"} removed from your list.`);
-      await fetchInvoices();
+      refreshAll();
     }
   };
+
+  /**
+   * Duplicate = open the editor on a NEW draft seeded from this invoice.
+   *
+   * Nothing is written here. The editor fetches the source through the existing
+   * `GET ?id=`, resets the number, the dates and the status, and waits for the
+   * user to save — see `lib/invoice-duplicate.ts` for why a server-side copy
+   * would be wrong (an unreviewed saved document, and a number burnt out of a
+   * series the law requires to be consecutive).
+   */
+  const duplicateInvoice = useCallback(
+    (invoiceId: string) => {
+      router.push(`/create-invoice?duplicate=${encodeURIComponent(invoiceId)}`);
+    },
+    [router]
+  );
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -159,10 +314,14 @@ export default function DashboardPage() {
     return "Good evening";
   }, []);
 
+  // Computed over `summaryInvoices` — the whole account — NOT over the table's
+  // current page, so paging or filtering never moves these numbers.
   const summary = useMemo(() => {
-    const paid = invoices.filter((invoice) => getInvoiceStatus(invoice) === "paid");
-    const outstanding = invoices.filter((invoice) => {
-      const status = getInvoiceStatus(invoice);
+    const paid = summaryInvoices.filter(
+      (invoice) => resolveDisplayStatus(invoice) === "paid"
+    );
+    const outstanding = summaryInvoices.filter((invoice) => {
+      const status = resolveDisplayStatus(invoice);
       return status === "sent" || status === "overdue";
     });
 
@@ -178,7 +337,7 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-    const counts = invoices.reduce<Record<string, number>>((acc, invoice) => {
+    const counts = summaryInvoices.reduce<Record<string, number>>((acc, invoice) => {
       const code = invoice.currency || "INR";
       acc[code] = (acc[code] || 0) + 1;
       return acc;
@@ -192,13 +351,13 @@ export default function DashboardPage() {
     const pendingByCurrency = sumByCurrency(outstanding);
 
     return {
-      count: invoices.length,
+      count: summaryInvoices.length,
       totalRevenue: revenueByCurrency[primaryCurrency] || 0,
       pendingAmount: pendingByCurrency[primaryCurrency] || 0,
       currency: primaryCurrency,
       otherCurrencyCount: currencies.length - 1,
     };
-  }, [invoices]);
+  }, [summaryInvoices]);
 
   return (
     <PageShell tone="app">
@@ -275,18 +434,42 @@ export default function DashboardPage() {
             <CardTitle className="text-xl text-slate-900 dark:text-slate-100">
               Your Invoices
             </CardTitle>
-            <Button variant="outline" size="sm" onClick={fetchInvoices} disabled={isLoading}>
-              <ReloadIcon className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshAll}
+              disabled={table.isLoading || isSummaryLoading}
+            >
+              <ReloadIcon
+                className={`w-4 h-4 ${
+                  table.isLoading || isSummaryLoading ? "animate-spin" : ""
+                }`}
+              />
               Refresh
             </Button>
           </CardHeader>
           <CardContent className="p-0">
-            {loadError ? (
+            <InvoiceFilterBar
+              state={listState}
+              onChange={changeListState}
+              total={table.total}
+              isLoading={table.isLoading}
+            />
+
+            {loadError || table.error ? (
               <div className="p-4">
                 <AlertBanner
-                  onRetry={canRetryLoad ? fetchInvoices : undefined}
+                  onRetry={
+                    loadError
+                      ? canRetryLoad
+                        ? refreshAll
+                        : undefined
+                      : table.canRetry
+                        ? refetchTable
+                        : undefined
+                  }
                 >
-                  {loadError}
+                  {loadError || table.error}
                 </AlertBanner>
               </div>
             ) : null}
@@ -297,22 +480,23 @@ export default function DashboardPage() {
               </div>
             ) : null}
 
-            {isLoading ? (
+            {table.isLoading ? (
               <div className="flex items-center gap-2 px-6 py-8 text-slate-600 dark:text-slate-300">
                 <ReloadIcon className="w-4 h-4 animate-spin" />
                 Loading invoices…
               </div>
-            ) : invoices.length ? (
+            ) : table.data.length ? (
               <>
                 <InvoiceCardList
                   className="md:hidden"
-                  invoices={invoices}
+                  invoices={table.data}
                   activeActionInvoiceId={activeActionInvoiceId}
                   handlersFor={(invoice) => ({
                     onView: () => setSelectedInvoice(invoice),
                     onEdit: () => router.push(`/create-invoice/${invoice._id}`),
                     onSettle: () => settleInvoice(invoice._id),
                     onDelete: () => setPendingDelete(invoice),
+                    onDuplicate: () => duplicateInvoice(invoice._id),
                   })}
                 />
 
@@ -333,8 +517,8 @@ export default function DashboardPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {invoices.map((invoice) => {
-                    const status = getInvoiceStatus(invoice);
+                  {table.data.map((invoice) => {
+                    const status = resolveDisplayStatus(invoice);
                     const isActioning = activeActionInvoiceId === invoice._id;
                     return (
                       <TableRow key={invoice._id}>
@@ -375,6 +559,7 @@ export default function DashboardPage() {
                               }
                               onSettle={() => settleInvoice(invoice._id)}
                               onDelete={() => setPendingDelete(invoice)}
+                              onDuplicate={() => duplicateInvoice(invoice._id)}
                             />
                           </div>
                         </TableCell>
@@ -384,7 +569,27 @@ export default function DashboardPage() {
                 </TableBody>
                 </Table>
               </>
-            ) : loadError ? null : (
+            ) : loadError || table.error ? null : isFiltered ? (
+              /* An empty page under a filter is not an empty account. Offering
+                 "create your first invoice" here would tell a user with ninety
+                 invoices that they have none. */
+              <div className="px-6 py-12 text-center">
+                <p className="text-base font-medium text-slate-800 dark:text-slate-100">
+                  No invoices match those filters
+                </p>
+                <p className="mx-auto mt-1 max-w-sm text-sm text-slate-600 dark:text-slate-300">
+                  Try a different search term, or clear the filters to see
+                  everything again.
+                </p>
+                <Button
+                  variant="outline"
+                  className="mt-5"
+                  onClick={() => changeListState({ search: "", status: "", page: 1 })}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            ) : (
               <div className="px-6 py-12 text-center">
                 <p className="text-base font-medium text-slate-800 dark:text-slate-100">
                   No invoices yet
@@ -400,6 +605,13 @@ export default function DashboardPage() {
               </div>
             )}
           </CardContent>
+          <Pagination
+            page={table.page}
+            limit={table.pageSize}
+            total={table.total}
+            onPageChange={table.setPage}
+            isLoading={table.isLoading}
+          />
         </Card>
       </div>
 
@@ -427,6 +639,7 @@ export default function DashboardPage() {
       {selectedInvoice ? (
         <InvoiceModal
           invoice={selectedInvoice}
+          payment={payment}
           onClose={() => setSelectedInvoice(null)}
           onSettle={settleInvoice}
           onDelete={() => setPendingDelete(selectedInvoice)}
@@ -434,6 +647,10 @@ export default function DashboardPage() {
           onEdit={(id) => {
             setSelectedInvoice(null);
             router.push(`/create-invoice/${id}`);
+          }}
+          onDuplicate={(id) => {
+            setSelectedInvoice(null);
+            duplicateInvoice(id);
           }}
         />
       ) : null}

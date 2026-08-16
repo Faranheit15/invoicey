@@ -34,9 +34,42 @@ import {
   normalizeGstin,
   panFromGstin,
 } from "@/lib/gstin";
+import { parsePagination } from "@/lib/server/pagination";
+import {
+  buildInvoiceListFilter,
+  parseInvoiceListSort,
+} from "@/lib/server/invoice-list-query";
 import { recordActivity, logRouteError } from "@/lib/server/log";
+import { deriveFinancialYear, suggestInvoiceNumber } from "@/lib/invoice-number";
+import {
+  financialYearRange,
+  highestInvoiceNumber,
+} from "@/lib/invoice-duplicate";
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
+
+/**
+ * How many of the financial year's invoices the number suggester reads.
+ *
+ * There is no `financialYear` field on the document, so "the highest number in
+ * this year" is a date-range query plus `highestInvoiceNumber` in JS. Bounded
+ * so a user with a very long history cannot turn a suggestion into a scan; the
+ * rows come back newest-first, and a series that needs more than 500 invoices
+ * of lookback is not a series this app can continue anyway.
+ */
+const NUMBER_SUGGESTION_SCAN_LIMIT = 500;
+
+/** The answer to `GET /api/invoices?suggest_number=1`. */
+export interface InvoiceNumberSuggestion {
+  /** The financial year the date falls in, e.g. "2026-27". */
+  financialYear: string;
+  /**
+   * The number to pre-fill, or null when the caller must ask the user — an
+   * exhausted series ("INV/2026-27/9999") or a legacy number whose own charset
+   * Rule 46(b) forbids. Advisory either way: the field stays editable.
+   */
+  invoiceNumber: string | null;
+}
 
 interface RawInvoiceItem {
   description?: string;
@@ -383,6 +416,10 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
   // In particular the per-head amounts are DERIVED from the line rates and the
   // supply geography; a client-supplied `cgst`/`sgst` only survives on the
   // legacy path, where there is nothing else to go on.
+  // Resolved before the totals: the §170 rupee rounding is INR-only, so
+  // computeTotals has to know the currency.
+  const currency = cleanString(raw.currency) || "INR";
+
   const totals = computeTotals({
     items: items.map((item) => ({
       quantity: item.quantity,
@@ -395,6 +432,7 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
       toNumber(raw.convenienceCharge, 0),
       MAX_MONEY_VALUE
     ),
+    currency,
     tax: resolveTaxContext({
       taxTreatment: gst?.taxTreatment,
       reverseCharge: gst?.reverseCharge,
@@ -443,7 +481,7 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
     dueDate: cleanString(raw.dueDate),
     terms: cleanString(raw.terms),
     notes: cleanString(raw.notes),
-    currency: cleanString(raw.currency) || "INR",
+    currency,
     items: storedItems,
     subtotal: totals.subtotal,
     discount: totals.discount,
@@ -491,6 +529,47 @@ export async function GET(req: NextRequest) {
   const invoiceId = searchParams.get("id");
 
   try {
+    // A third read mode on the same route, disambiguated by a query param
+    // exactly as `?id=` already disambiguates item from collection.
+    //
+    // It exists because only the SERVER can see every invoice in the series:
+    // the editor holds one draft, and the dashboard holds only what it fetched.
+    // Suggesting is deliberately not the same as issuing — nothing is written
+    // and no counter moves, so an abandoned draft leaves no gap in a series
+    // Rule 46(b) requires to be consecutive.
+    if (searchParams.get("suggest_number") !== null) {
+      const rawDate = (searchParams.get("date") || "").trim();
+      const financialYear = deriveFinancialYear(rawDate || new Date());
+      const range = financialYearRange(financialYear);
+      if (!range) {
+        return NextResponse.json(
+          { error: "That date isn't one we can read." },
+          { status: 400 }
+        );
+      }
+
+      const rows = (await Invoice.find(
+        {
+          userId: userUid,
+          is_deleted: { $ne: true },
+          invoiceDate: { $gte: range.start, $lt: range.end },
+        },
+        { invoiceNumber: 1 }
+      )
+        .sort({ createdAt: -1 })
+        .limit(NUMBER_SUGGESTION_SCAN_LIMIT)
+        .lean()) as unknown as { invoiceNumber?: string }[];
+
+      const suggestion: InvoiceNumberSuggestion = {
+        financialYear,
+        invoiceNumber: suggestInvoiceNumber({
+          financialYear,
+          previous: highestInvoiceNumber(rows.map((row) => row.invoiceNumber)),
+        }),
+      };
+      return NextResponse.json(suggestion);
+    }
+
     if (invoiceId) {
       const invoice = await Invoice.findOne({
         _id: invoiceId,
@@ -503,11 +582,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(invoice);
     }
 
-    const invoices = await Invoice.find({
-      userId: userUid,
-      is_deleted: { $ne: true },
-    }).sort({ createdAt: -1 });
-    return NextResponse.json(invoices);
+    // Tenant scope and the soft-delete rule are applied INSIDE
+    // `buildInvoiceListFilter`, unconditionally, so neither can be dropped by
+    // adding a search or a status filter here.
+    const listFilter = buildInvoiceListFilter({ userId: userUid, searchParams });
+    const { spec } = parseInvoiceListSort(searchParams);
+    // Paginate only when asked, so `invoicesApi.list()` keeps returning an array.
+    if (searchParams.get("page") === null && searchParams.get("limit") === null) {
+      return NextResponse.json(await Invoice.find(listFilter).sort(spec));
+    }
+    const { page, limit, skip } = parsePagination(searchParams, {
+      defaultLimit: 25,
+      maxLimit: 100,
+    });
+    const [total, invoices] = await Promise.all([
+      Invoice.countDocuments(listFilter),
+      Invoice.find(listFilter).sort(spec).skip(skip).limit(limit).lean(),
+    ]);
+    return NextResponse.json({ invoices, page, limit, total });
   } catch (error: unknown) {
     if (isNotFoundOrInvalidIdError(error)) {
       return NextResponse.json({ error: "Invalid invoice id" }, { status: 400 });
