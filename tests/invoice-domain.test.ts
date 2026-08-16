@@ -407,7 +407,7 @@ describe("computeTotals — discount apportionment", () => {
 describe("computeTotals — §170 rounding", () => {
   it("rounds a tax invoice to the nearest rupee and reports the delta", () => {
     const up = computeTotals({
-      items: [{ quantity: 1, unitPrice: 1_234.56 }],
+      items: [{ quantity: 1, unitPrice: 1_046.24, taxRatePercent: 18 }],
       discount: 0,
       convenienceCharge: 0,
       tax: derived(),
@@ -416,13 +416,50 @@ describe("computeTotals — §170 rounding", () => {
     expect(up.roundOff).toBe(0.44);
 
     const down = computeTotals({
-      items: [{ quantity: 1, unitPrice: 1_234.49 }],
+      items: [{ quantity: 1, unitPrice: 1_046.16, taxRatePercent: 18 }],
       discount: 0,
       convenienceCharge: 0,
       tax: derived(),
     });
     expect(down.total).toBe(1_234);
-    expect(down.roundOff).toBe(-0.49);
+    expect(down.roundOff).toBe(-0.46);
+  });
+
+  it("does not round a foreign-currency invoice", () => {
+    // §170 rounds a sum payable in RUPEES. A "Round Off $0.07" line on a USD
+    // export is both wrong and unexplainable to the client reading it, and
+    // exports are exactly where non-INR is used.
+    const usd = computeTotals({
+      items: [{ quantity: 1, unitPrice: 1_046.24, taxRatePercent: 18 }],
+      discount: 0,
+      convenienceCharge: 0,
+      currency: "USD",
+      tax: derived(),
+    });
+    expect(usd.roundOff).toBe(0);
+    expect(usd.total).toBe(1_234.56);
+  });
+
+  it("does not round when no tax was charged, whatever the reason", () => {
+    // A zero-rated export under LUT and an unregistered supplier's invoice are
+    // both zero-tax documents for the same supply; they must not disagree about
+    // the total because one took the derived path and the other did not.
+    const items = [{ quantity: 1, unitPrice: 1_000.6, taxRatePercent: 18 }];
+    const lut = computeTotals({
+      items,
+      discount: 0,
+      convenienceCharge: 0,
+      tax: derived({ supplyKind: "export" }),
+    });
+    const unregistered = computeTotals({
+      items,
+      discount: 0,
+      convenienceCharge: 0,
+      tax: { mode: "none", suppressedBecause: "unregistered" },
+    });
+    expect(lut.total).toBe(1_000.6);
+    expect(lut.roundOff).toBe(0);
+    expect(lut.total).toBe(unregistered.total);
   });
 
   it("emits no Round Off row when there is nothing to round", () => {

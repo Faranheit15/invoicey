@@ -94,7 +94,9 @@ findings, all fixed before the commit.
 - [x] 1. `taxTreatment`
 - [x] 2. GSTIN fields + `lib/gstin.ts`
 - [x] 3. Business profile
-- [x] 4. Invoice numbering
+- [~] 4. Invoice numbering — pure module done and tested, but **not enforced**:
+      no unique index, no charset/length rule on the write path, and
+      `lib/invoices.ts` still mints `Date.now().slice(-6)`. Marked done in error.
 - [x] 5. Place of supply + IGST
 - [x] 6. Per-line HSN/SAC + UOM + tax rate
 - [x] 7. Amount in words, `en-GB` dates, PAN + TDS, signature block, round-off
@@ -126,6 +128,27 @@ findings, all fixed before the commit.
 - [x] Every module landed correctly and the invoice still had no GSTIN columns,
       so neither party's GSTIN could print — caught only because it was flagged
       rather than routed around
+
+### Phase 2 audit — confirmed defects
+
+Fixed:
+- [x] §170 rupee rounding applied to USD/EUR/GBP/AED invoices, printing a
+      "Round Off $0.07" line on a foreign document
+- [x] Rounding fired on a zero-rated LUT export but not on an identical
+      unregistered invoice, so two zero-tax documents disagreed on the total
+- [x] Legacy re-save drift: the new per-line rounding summed rounded values
+      where the old code summed raw and rounded once, shifting the total by a
+      paisa on fractional quantities — silently rewriting an issued document
+
+Still open:
+- [ ] Rule 46(b) unenforced (see item 4 above) — **highest remaining risk**
+- [ ] Rule 46(j): per-line taxable value never printed, so the line table does
+      not reconcile (a line reads Rate 18 | Tax 174.00 | Amount 1000.00)
+- [ ] The statutory export endorsement prints on an unregistered supplier's
+      document, and the LUT rule *blocks them from saving at all*
+- [ ] Omitting `taxTreatment` still buys arbitrary invoice-level CGST/SGST
+- [ ] A non-slab rate (e.g. 15%) is silently dropped rather than rejected
+- [ ] Rule 46(e)/(n): no delivery-address field exists in the schema
 
 ## Phase 3 — Make it worth coming back to
 

@@ -178,6 +178,11 @@ export interface TotalsInput {
   convenienceCharge: number;
   /** Absent => `{ mode: "legacy", cgst, sgst }` from the flat fields below. */
   tax?: TotalsTaxContext;
+  /**
+   * ISO code. Only consulted for the §170 rupee rounding, which is a rule about
+   * rupees — rounding a USD export to the whole dollar is not it.
+   */
+  currency?: string;
   /** @deprecated Flat legacy amounts. Present so existing call sites compile. */
   cgst?: number;
   /** @deprecated Flat legacy amounts. Present so existing call sites compile. */
@@ -336,7 +341,25 @@ export const computeTotals = (input: TotalsInput): InvoiceTotals => {
   );
 
   // 2-3. Bases, and the invoice-level discount that can actually be taken.
-  const subtotal = round2(gross.reduce((sum, value) => sum + value, 0));
+  // Legacy invoices summed the RAW products and rounded once at the end; the
+  // per-line rounding above is a Phase 2 addition, needed so that a printed line
+  // reconciles with the tax charged on it. Summing the rounded values instead
+  // shifts the subtotal by a paisa on fractional quantities (2 lines of 2.5 x
+  // 33.33: 166.65 before, 166.64 after) — which would silently rewrite the total
+  // of an already-issued document the next time it is saved. Reads are protected
+  // by the stored `subtotal`/`total`, but a re-save is not, so legacy keeps the
+  // old arithmetic exactly.
+  const subtotal =
+    tax.mode === "legacy"
+      ? round2(
+          items.reduce(
+            (sum, item) =>
+              sum +
+              Math.max(0, item.quantity || 0) * Math.max(0, item.unitPrice || 0),
+            0
+          )
+        )
+      : round2(gross.reduce((sum, value) => sum + value, 0));
   const netBase = round2(netValues.reduce((sum, value) => sum + value, 0));
   const enteredDiscount = round2(Math.max(0, input.discount || 0));
   const appliedDiscount = Math.min(enteredDiscount, netBase);
@@ -451,11 +474,24 @@ export const computeTotals = (input: TotalsInput): InvoiceTotals => {
     const rawTotal = round2(
       Math.max(0, taxableValue + cgst + sgst + igst + convenienceCharge)
     );
-    if (tax.mode === "derived") {
+    // §170 rounds "the amount of tax, interest, penalty, refund or any other
+    // sum payable" to the nearest rupee. Two conditions follow from that and
+    // both are load-bearing:
+    //
+    //  - It is a rule about RUPEES. An export invoiced in USD has no rupee
+    //    amount to round, and rounding it produced a "Round Off $0.07" line on
+    //    a foreign document — which is both wrong and unexplainable to the
+    //    client reading it.
+    //  - There must be tax. A zero-rated export under LUT collects nothing, so
+    //    there is nothing to round; without this it rounded while an otherwise
+    //    identical unregistered invoice did not, giving two zero-tax documents
+    //    different totals for the same supply.
+    const isRupees = (input.currency || "INR").toUpperCase() === "INR";
+    const taxWasCharged = cgst + sgst + igst > 0;
+    if (tax.mode === "derived" && isRupees && taxWasCharged) {
       total = roundToRupee(rawTotal);
       roundOff = round2(total - rawTotal);
     } else {
-      // Nothing was collected as tax, so there is no tax to round under §170.
       total = rawTotal;
       roundOff = 0;
     }
@@ -604,6 +640,7 @@ export const resolveRecordAmounts = (invoice: InvoiceRecord): InvoiceTotals => {
     })),
     discount: invoice.discount ?? 0,
     convenienceCharge: invoice.convenienceCharge ?? 0,
+    currency: invoice.currency,
     tax: taxContextForRecord(invoice),
     tds: { section: invoice.tdsSection, ratePercent: invoice.tdsRatePercent },
   });
