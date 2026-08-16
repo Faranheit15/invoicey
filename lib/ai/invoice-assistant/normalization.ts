@@ -3,6 +3,13 @@ import {
   type InvoiceFormItem,
   type InvoiceFormState,
 } from "@/lib/invoices";
+import {
+  MAX_UNIT_LENGTH,
+  isAcceptedGstRate,
+  isValidHsnSac,
+  placeOfSupplyLabelFor,
+} from "@/lib/gst-rates";
+import { GST_STATE_CODES, OTHER_COUNTRY_STATE_CODE } from "@/lib/gstin";
 import type {
   InvoiceAssistantPatch,
   InvoiceAssistantResponse,
@@ -93,6 +100,46 @@ const toQuantity = (value: unknown): number | undefined => {
   return Math.max(1, Number(parsed.toFixed(2)));
 };
 
+/**
+ * A rate the model emitted, WHITELISTED against the real slab table.
+ *
+ * A hallucinated 15% must never reach form state — it would be printed on a
+ * document, charged to a client, and filed in a return. A retired 12% is kept:
+ * it is a real rate withdrawn on 22 Sep 2025, a back-dated invoice legitimately
+ * carries it, and `validateInvoice` raises it as a warning rather than a drop.
+ */
+const normalizeTaxRate = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  const rounded = Number(parsed.toFixed(2));
+  return isAcceptedGstRate(rounded) ? rounded : undefined;
+};
+
+/** Rule 46(f) format only — digits, 4/6/8 long. Anything else is dropped. */
+const normalizeHsnSac = (value: unknown): string | undefined => {
+  const raw = toTrimmedString(value);
+  return isValidHsnSac(raw) ? raw : undefined;
+};
+
+/** UQC: free text, upper-cased and capped. A wrong unit is not worth a drop. */
+const normalizeUnit = (value: unknown): string | undefined => {
+  const raw = toTrimmedString(value).toUpperCase().slice(0, MAX_UNIT_LENGTH);
+  return raw || undefined;
+};
+
+/** A real GST state code, or "96" (outside India). Never a free-text state. */
+const normalizeStateCode = (value: unknown): string | undefined => {
+  const raw = toTrimmedString(value);
+  if (raw === OTHER_COUNTRY_STATE_CODE) {
+    return raw;
+  }
+  return Object.prototype.hasOwnProperty.call(GST_STATE_CODES, raw)
+    ? raw
+    : undefined;
+};
+
 const normalizeItems = (value: unknown): InvoiceFormItem[] | undefined => {
   if (!Array.isArray(value)) {
     return undefined;
@@ -109,10 +156,21 @@ const normalizeItems = (value: unknown): InvoiceFormItem[] | undefined => {
         return null;
       }
 
+      const hsnSac = normalizeHsnSac(itemObject.hsnSac);
+      const unit = normalizeUnit(itemObject.unit);
+      const discount = toNonNegativeNumber(itemObject.discount);
+      const taxRatePercent = normalizeTaxRate(itemObject.taxRatePercent);
+
+      // Spread-when-present, never `?? 0`: an ABSENT rate means "this line was
+      // never given one", and writing a 0 would claim the model chose zero-rated.
       return {
         description,
         quantity,
         unitPrice,
+        ...(hsnSac !== undefined ? { hsnSac } : {}),
+        ...(unit !== undefined ? { unit } : {}),
+        ...(discount !== undefined ? { discount } : {}),
+        ...(taxRatePercent !== undefined ? { taxRatePercent } : {}),
       };
     })
     .filter((item): item is InvoiceFormItem => Boolean(item));
@@ -124,6 +182,11 @@ const normalizeItems = (value: unknown): InvoiceFormItem[] | undefined => {
   return normalized.slice(0, 40);
 };
 
+/** The keys of `T` whose type is exactly `string` (unions and enums excluded). */
+type StringKeys<T> = {
+  [K in keyof T]-?: string extends NonNullable<T[K]> ? K : never;
+}[keyof T];
+
 const buildPatch = (rawPatch: unknown): InvoiceAssistantPatch => {
   if (!rawPatch || typeof rawPatch !== "object") {
     return {};
@@ -132,7 +195,14 @@ const buildPatch = (rawPatch: unknown): InvoiceAssistantPatch => {
   const patchObject = rawPatch as Record<string, unknown>;
   const patch: InvoiceAssistantPatch = {};
 
-  const stringFieldKeys: Array<keyof Omit<InvoiceFormState, "items" | "discount" | "cgst" | "sgst" | "convenienceCharge" | "status">> =
+  // Every key that is a plain `string` on BOTH the patch and the form state.
+  // Deriving it from the intersection (rather than `keyof Omit<InvoiceFormState,
+  // ...>`, as this did) is what lets the patch be a strict SUBSET of the form:
+  // adding a form field no longer breaks this file, while renaming or retyping
+  // one still does — which is the half of the coupling worth keeping.
+  const stringFieldKeys: Array<
+    Extract<StringKeys<InvoiceAssistantPatch>, StringKeys<InvoiceFormState>>
+  > =
     [
       "companyName",
       "companyEmail",
@@ -180,14 +250,18 @@ const buildPatch = (rawPatch: unknown): InvoiceAssistantPatch => {
     patch.discount = discount;
   }
 
-  const cgst = toNonNegativeNumber(patchObject.cgst);
-  if (cgst !== undefined) {
-    patch.cgst = cgst;
-  }
-
-  const sgst = toNonNegativeNumber(patchObject.sgst);
-  if (sgst !== undefined) {
-    patch.sgst = sgst;
+  // `cgst`, `sgst`, `tax` and `taxTreatment` are READ AND DISCARDED. They are
+  // absent from `InvoiceAssistantPatch` (see the comment there), so a model that
+  // emits them simply has them ignored — no field, no application, no drift.
+  const placeOfSupplyStateCode = normalizeStateCode(
+    patchObject.placeOfSupplyStateCode
+  );
+  if (placeOfSupplyStateCode !== undefined) {
+    patch.placeOfSupplyStateCode = placeOfSupplyStateCode;
+    // The LABEL is ours, derived from our own table. A model-supplied place
+    // name is the one part of this that gets printed on the document, so it
+    // never comes from the model.
+    patch.placeOfSupplyLabel = placeOfSupplyLabelFor(placeOfSupplyStateCode);
   }
 
   const convenienceCharge = toNonNegativeNumber(patchObject.convenienceCharge);

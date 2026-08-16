@@ -6,6 +6,7 @@ import connectDB from "@/lib/mongodb";
 import User from "@/models/User";
 import Invoice from "@/models/Invoice";
 import Feedback from "@/models/Feedback";
+import BusinessProfile from "@/models/BusinessProfile";
 import LogEntry from "@/models/LogEntry";
 import { logEvent, logEventNow, logRouteError } from "@/lib/server/log";
 import { consumeRateLimit } from "@/lib/server/rate-limit";
@@ -164,6 +165,9 @@ export async function DELETE(req: NextRequest) {
     const invoicesResult = await Invoice.deleteMany({ userId: uid });
     invoicesDestroyed = (invoicesResult?.deletedCount ?? 0) > 0;
     const feedbackResult = await Feedback.deleteMany({ userId: uid });
+    // The business profile holds the user's GSTIN, PAN and postal address, so
+    // it is destroyed outright rather than anonymised.
+    await BusinessProfile.deleteMany({ userId: uid });
 
     // Logs are ANONYMISED, not destroyed: once every identifying field is gone
     // the row is no longer personal data, and what remains is the aggregate

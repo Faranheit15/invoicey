@@ -1,4 +1,5 @@
 import { describe, it, expect, mock, beforeEach } from "bun:test";
+import * as realBusinessProfile from "@/models/BusinessProfile";
 import { NextResponse } from "next/server";
 import * as realAuth from "@/lib/server/auth";
 
@@ -145,11 +146,19 @@ const Users = makeModel();
 const Invoices = makeModel();
 const Feedbacks = makeModel();
 const Logs = makeModel();
+const Profiles = makeModel();
 
 mock.module("@/models/User", () => ({ default: Users }));
 mock.module("@/models/Invoice", () => ({ default: Invoices }));
 mock.module("@/models/Feedback", () => ({ default: Feedbacks }));
 mock.module("@/models/LogEntry", () => ({ default: Logs }));
+// Spread the real module: Bun's mock.module is process-global and replaces the
+// WHOLE module, so returning only `default` makes every named export vanish for
+// every suite that runs after this one.
+mock.module("@/models/BusinessProfile", () => ({
+  ...realBusinessProfile,
+  default: Profiles,
+}));
 
 const { GET: exportGet } = await import("@/app/api/account/export/route");
 const { DELETE: accountDelete, GET: accountGet } = await import(

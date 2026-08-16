@@ -6,6 +6,13 @@ import {
   type InvoiceFormItem,
   type InvoiceFormState,
 } from "@/lib/invoices";
+import {
+  MAX_UNIT_LENGTH,
+  isAcceptedGstRate,
+  isValidHsnSac,
+  placeOfSupplyLabelFor,
+} from "@/lib/gst-rates";
+import { GST_STATE_CODES, OTHER_COUNTRY_STATE_CODE } from "@/lib/gstin";
 
 const toDateInputValue = (value: string) => {
   const trimmed = value.trim();
@@ -29,21 +36,68 @@ const cleanString = (value: string | undefined) => {
   return typeof value === "string" ? value.trim() : "";
 };
 
+/**
+ * Defence in depth. `normalization.ts` already whitelists these on the server;
+ * this runs client-side, and the client is the last line before a value reaches
+ * the form and then the printed document. Both copies drop silently rather than
+ * coercing — a rate we do not recognise is not a rate we should charge.
+ */
+const cleanHsnSac = (value: string | undefined): string | undefined => {
+  const raw = cleanString(value);
+  return isValidHsnSac(raw) ? raw : undefined;
+};
+
+const cleanUnit = (value: string | undefined): string | undefined => {
+  const raw = cleanString(value).toUpperCase().slice(0, MAX_UNIT_LENGTH);
+  return raw || undefined;
+};
+
+const cleanTaxRate = (value: number | undefined): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  const rounded = Number(value.toFixed(2));
+  return isAcceptedGstRate(rounded) ? rounded : undefined;
+};
+
+const cleanStateCode = (value: string | undefined): string | undefined => {
+  const raw = cleanString(value);
+  if (raw === OTHER_COUNTRY_STATE_CODE) {
+    return raw;
+  }
+  return Object.prototype.hasOwnProperty.call(GST_STATE_CODES, raw)
+    ? raw
+    : undefined;
+};
+
 const normalizeItems = (items: InvoiceFormItem[] | undefined): InvoiceFormItem[] | null => {
   if (!items?.length) {
     return null;
   }
 
   const normalizedItems = items
-    .map((item) => ({
-      description: cleanString(item.description),
-      quantity: Number.isFinite(item.quantity)
-        ? Math.max(1, Number(item.quantity.toFixed(2)))
-        : 1,
-      unitPrice: Number.isFinite(item.unitPrice)
-        ? Math.max(0, Number(item.unitPrice.toFixed(2)))
-        : 0,
-    }))
+    .map((item) => {
+      const hsnSac = cleanHsnSac(item.hsnSac);
+      const unit = cleanUnit(item.unit);
+      const discount = toNonNegativeNumber(item.discount);
+      const taxRatePercent = cleanTaxRate(item.taxRatePercent);
+
+      return {
+        description: cleanString(item.description),
+        quantity: Number.isFinite(item.quantity)
+          ? Math.max(1, Number(item.quantity.toFixed(2)))
+          : 1,
+        unitPrice: Number.isFinite(item.unitPrice)
+          ? Math.max(0, Number(item.unitPrice.toFixed(2)))
+          : 0,
+        // Spread-when-present: an absent field must stay absent, because that
+        // absence is how a line says "written before per-line tax existed".
+        ...(hsnSac !== undefined ? { hsnSac } : {}),
+        ...(unit !== undefined ? { unit } : {}),
+        ...(discount !== null ? { discount } : {}),
+        ...(taxRatePercent !== undefined ? { taxRatePercent } : {}),
+      };
+    })
     .filter((item) => item.description.length > 0);
 
   return normalizedItems.length ? normalizedItems : null;
@@ -139,22 +193,22 @@ export const applyInvoiceAssistantPatch = (
     appliedFields.push("discount");
   }
 
-  const cgst = toNonNegativeNumber(patch.cgst);
-  if (cgst !== null) {
+  // No `cgst`/`sgst` blocks: the assistant cannot set tax amounts any more.
+  // Tax is derived from `items[].taxRatePercent` and the supply geography, and
+  // an even CGST/SGST split — what the old prompt asked for — is silently wrong
+  // for every inter-State supply.
+  const placeOfSupplyStateCode = cleanStateCode(patch.placeOfSupplyStateCode);
+  if (placeOfSupplyStateCode !== undefined) {
     nextState = {
       ...nextState,
-      cgst,
+      placeOfSupplyStateCode,
+      // The label is derived here too, never taken from the patch: it is the
+      // part that gets printed.
+      placeOfSupplyLabel: placeOfSupplyLabelFor(placeOfSupplyStateCode),
+      // The user did not move this; the assistant did, from what they described.
+      placeOfSupplyOverridden: true,
     };
-    appliedFields.push("cgst");
-  }
-
-  const sgst = toNonNegativeNumber(patch.sgst);
-  if (sgst !== null) {
-    nextState = {
-      ...nextState,
-      sgst,
-    };
-    appliedFields.push("sgst");
+    appliedFields.push("placeOfSupplyStateCode");
   }
 
   const convenienceCharge = toNonNegativeNumber(patch.convenienceCharge);

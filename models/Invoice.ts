@@ -1,4 +1,9 @@
 import mongoose, { Schema, Document } from "mongoose";
+import type {
+  DocumentType,
+  SupplyKind,
+  TaxTreatment,
+} from "@/lib/gst-supply";
 
 export interface IInvoice extends Document {
   userId: string;
@@ -16,18 +21,51 @@ export interface IInvoice extends Document {
   terms?: string;
   notes?: string;
   currency: string;
-  items: { name: string; price: number; quantity: number }[];
+  items: {
+    name: string;
+    price: number;
+    quantity: number;
+    hsnSac?: string;
+    unit?: string;
+    discount?: number;
+    taxRatePercent?: number;
+    taxableValue?: number;
+    cgstAmount?: number;
+    sgstAmount?: number;
+    igstAmount?: number;
+  }[];
   subtotal: number;
   discount: number;
   tax?: number;
   cgst: number;
   sgst: number;
+  igst?: number;
+  taxableValue?: number;
+  roundOff?: number;
   convenienceCharge: number;
   paymentInfo?: string;
   total: number;
   status: "draft" | "sent" | "paid" | "overdue";
   is_deleted: boolean;
   createdAt: Date;
+
+  // Phase 2 GST fields, all optional. `taxTreatment` and `documentType` have NO
+  // schema default on purpose: absence is how a pre-Phase-2 document announces
+  // itself to `resolveTaxContext`, and a default would erase that the first time
+  // an old document is re-saved.
+  taxTreatment?: TaxTreatment;
+  documentType?: DocumentType;
+  reverseCharge?: boolean;
+  supplierStateCode?: string;
+  placeOfSupplyStateCode?: string;
+  placeOfSupplyLabel?: string;
+  placeOfSupplyOverridden?: boolean;
+  supplyKind?: SupplyKind;
+  recipientIsSez?: boolean;
+  recipientIsOutsideIndia?: boolean;
+  withPaymentOfTax?: boolean;
+  lutArn?: string;
+  countryOfDestination?: string;
 }
 
 const InvoiceSchema: Schema = new Schema({
@@ -64,13 +102,34 @@ const InvoiceSchema: Schema = new Schema({
       name: { type: String, required: true },
       price: { type: Number, required: true },
       quantity: { type: Number, required: true },
+      // Item 6. No defaults: an absent HSN/SAC or rate means the line was
+      // written before per-line tax existed, and the printed table omits the
+      // column entirely rather than showing an empty one.
+      hsnSac: { type: String },
+      unit: { type: String },
+      discount: { type: Number },
+      taxRatePercent: { type: Number },
+      // Derived, stored so a later rate-table edit cannot re-price an issued
+      // document.
+      taxableValue: { type: Number },
+      cgstAmount: { type: Number },
+      sgstAmount: { type: Number },
+      igstAmount: { type: Number },
     },
   ],
   subtotal: { type: Number, required: true },
   discount: { type: Number, required: true, default: 0 },
+  // Pre-migration single tax field. Still read as a fallback, never written.
   tax: { type: Number, default: 0 },
-  cgst: { type: Number, required: true, default: 0 },
-  sgst: { type: Number, required: true, default: 0 },
+  // `required: true` alongside `default: 0` could never fire — the default runs
+  // first, so the validator saw 0, not undefined. It was never what forced tax
+  // rows onto unregistered users (unconditional rows in `buildTotalsRows` were).
+  // Dropped as dead weight; the default stays, because it is load-bearing.
+  cgst: { type: Number, default: 0 },
+  sgst: { type: Number, default: 0 },
+  igst: { type: Number, default: 0 },
+  taxableValue: { type: Number },
+  roundOff: { type: Number, default: 0 },
   convenienceCharge: { type: Number, required: true },
   paymentInfo: { type: String, default: "" },
   total: { type: Number, required: true },
@@ -81,6 +140,27 @@ const InvoiceSchema: Schema = new Schema({
   },
   is_deleted: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
+
+  // --- Phase 2: registration status, supply geography, reverse charge.
+  // NO default on taxTreatment/documentType/supplyKind: absence means
+  // "written before this field existed" and must stay distinguishable from an
+  // explicit value, or the legacy read path becomes untestable.
+  taxTreatment: { type: String, enum: ["none", "gst", "composition"] },
+  documentType: {
+    type: String,
+    enum: ["tax_invoice", "invoice", "bill_of_supply"],
+  },
+  reverseCharge: { type: Boolean, default: false },
+  supplierStateCode: { type: String, default: "" },
+  placeOfSupplyStateCode: { type: String, default: "" },
+  placeOfSupplyLabel: { type: String, default: "" },
+  placeOfSupplyOverridden: { type: Boolean, default: false },
+  supplyKind: { type: String, enum: ["intra", "inter", "export", "sez"] },
+  recipientIsSez: { type: Boolean, default: false },
+  recipientIsOutsideIndia: { type: Boolean, default: false },
+  withPaymentOfTax: { type: Boolean, default: false },
+  lutArn: { type: String, default: "" },
+  countryOfDestination: { type: String, default: "" },
 });
 
 // Every read is `find({ userId, is_deleted }).sort({ createdAt: -1 })`.

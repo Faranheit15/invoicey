@@ -177,6 +177,12 @@ export default function Header() {
               Feedback
             </Link>
           ) : null}
+          {/* The only route to /profile, which seeds every new invoice. */}
+          {user ? (
+            <Link href="/profile" className="hover:text-slate-900 dark:hover:text-white">
+              Business
+            </Link>
+          ) : null}
           {/* The only route to /account, which owns data export + account
               deletion. Without this link the page is unreachable in the UI. */}
           {user ? (
@@ -298,6 +304,13 @@ export default function Header() {
                   className="rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   Feedback
+                </Link>
+                <Link
+                  href="/profile"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Business
                 </Link>
                 <Link
                   href="/account"

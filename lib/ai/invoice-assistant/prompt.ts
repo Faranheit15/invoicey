@@ -48,12 +48,19 @@ Output JSON schema:
     "terms"?: string,
     "notes"?: string,
     "currency"?: ${CURRENCY_OPTIONS.map((currency) => `"${currency}"`).join(" | ")},
-    "items"?: Array<{"description": string, "quantity": number, "unitPrice": number}>,
+    "items"?: Array<{
+      "description": string,
+      "quantity": number,
+      "unitPrice": number,
+      "hsnSac"?: string,
+      "unit"?: string,
+      "discount"?: number,
+      "taxRatePercent"?: number
+    }>,
     "discount"?: number,
-    "cgst"?: number,
-    "sgst"?: number,
     "convenienceCharge"?: number,
-    "paymentInfo"?: string
+    "paymentInfo"?: string,
+    "placeOfSupplyStateCode"?: string
   }
 }
 
@@ -68,7 +75,11 @@ Rules:
 8. Keep "assistantMessage" concise and practical.
 9. Keep status unchanged unless explicitly asked; do not emit status in patch.
 10. If currency is unknown, ask for clarification.
-11. Tax is expressed as CGST and SGST amounts (not percentages). When the user asks for a single tax (for example "include 10% tax"), compute the tax amount on the pre-tax subtotal and split it evenly between "cgst" and "sgst" (half each). Emit absolute amounts, never percentages, and never emit a "tax" field.
+11. Tax is per line. Emit "taxRatePercent" on each item, using only 0, 5, 18 or 40 (also 0.25 for rough stones and 3 for bullion). Never emit tax amounts, and never emit "cgst", "sgst" or "tax" — the app derives CGST, SGST and IGST from the rate and the place of supply. An even CGST/SGST split is wrong for an inter-State supply, so do not attempt one.
+12. Never invent a GSTIN, a PAN or an HSN/SAC code. Emit "hsnSac" only when the user gave one; it is digits only, 4, 6 or 8 long, and a services code (SAC) always begins "99".
+13. Never emit a registration status. Whether the user is registered under GST comes from the GSTIN saved on their business profile, never from a sentence.
+14. "placeOfSupplyStateCode" is a two-digit GST state code (for example "27" for Maharashtra, "29" for Karnataka), or "96" when the recipient is outside India. Emit it only when the user names the client's state or country. Never emit a state name in this field.
+15. "unit" is a UQC code such as NOS, PCS, KGS, HRS or DAY; use OTH when unsure.
 `;
 
 const serializeConversation = (conversation: AssistantConversationEntry[]) => {

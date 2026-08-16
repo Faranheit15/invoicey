@@ -98,10 +98,16 @@ describe("InvoiceModal totals", () => {
       subtotal: undefined,
       total: undefined as unknown as number,
     });
-    const csvTotals = createInvoiceCsv(invoice)
-      .split("\n")
-      .slice(-6)
-      .map((line) => line.split(",").map((cell) => cell.slice(1, -1)));
+    // The totals block is the last section, after the final blank line. It is
+    // no longer the last thing in the file — "Amount in words" and the
+    // tax-suppression note are printed after the Total, exactly as they are on
+    // the document — so locate the section rather than counting back from the
+    // end.
+    const csvLines = createInvoiceCsv(invoice).split("\n");
+    const csvTotals = csvLines
+      .slice(csvLines.lastIndexOf("") + 1)
+      .map((line) => line.split(",").map((cell) => cell.slice(1, -1)))
+      .filter(([label]) => !["Amount in words", "Note"].includes(label));
 
     expect(modalTotalsRows(invoice).map(([label]) => label)).toEqual(
       csvTotals.map(([label]) => label)

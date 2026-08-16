@@ -4,6 +4,10 @@ import type { User } from "firebase/auth";
 import type { InvoiceRecord, InvoicePayload } from "@/lib/invoices";
 import type { ClientEventInput } from "@/lib/logs";
 import type { FeedbackInput, FeedbackRecord } from "@/lib/feedback";
+// `import type` is load-bearing: @/models/BusinessProfile imports mongoose, and
+// a value import here would pull the driver into the browser bundle. The type
+// is erased at compile time, so nothing ships.
+import type { BusinessProfileFields } from "@/models/BusinessProfile";
 import type {
   AdminMe,
   AdminOverview,
@@ -357,6 +361,39 @@ export const accountApi = {
     authedFetch<AccountDeleteResult>("/api/account", {
       method: "DELETE",
       body: JSON.stringify({ confirmEmail }),
+    }),
+};
+
+/**
+ * The saved seller-side details that seed every new invoice.
+ *
+ * `Required<...>` because the route always answers with every key present —
+ * including for a user who has never saved one — so the UI binds straight to
+ * these fields with no `?? ""` at every input.
+ */
+export type BusinessProfile = Required<BusinessProfileFields>;
+
+export interface BusinessProfileResponse {
+  profile: BusinessProfile;
+  /** false when the user has never saved a profile. Shape is identical either way. */
+  exists: boolean;
+}
+
+export interface SaveBusinessProfileResponse extends BusinessProfileResponse {
+  message: string;
+}
+
+/**
+ * Read and write the business profile. `save` is a PUT upsert: there is exactly
+ * one profile per user, so there is no create-vs-update for a caller to choose
+ * between, and `get` never 404s on a user who has not saved one yet.
+ */
+export const profileApi = {
+  get: () => authedFetch<BusinessProfileResponse>("/api/profile"),
+  save: (profile: BusinessProfile) =>
+    authedFetch<SaveBusinessProfileResponse>("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify(profile),
     }),
 };
 
