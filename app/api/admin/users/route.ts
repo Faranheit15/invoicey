@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
 
     const [total, usersRaw] = await Promise.all([
       User.countDocuments(filter),
-      User.find(filter, { accessToken: 0, refreshToken: 0 })
+      User.find(filter)
         .sort({ [sortField]: order })
         .skip(skip)
         .limit(limit)

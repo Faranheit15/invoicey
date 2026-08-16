@@ -207,9 +207,8 @@ export async function GET(req: NextRequest) {
       userId: userUid,
       category: "invoice",
     });
-    const err = error as Error;
     return NextResponse.json(
-      { error: "Internal Server Error", details: err.message },
+      { error: "Internal Server Error" },
       { status: 500 }
     );
   }
@@ -262,9 +261,8 @@ export async function POST(req: NextRequest) {
       userId: userUid,
       category: "invoice",
     });
-    const err = error as Error;
     return NextResponse.json(
-      { error: "Internal Server Error", details: err.message },
+      { error: "Internal Server Error" },
       { status: 500 }
     );
   }
@@ -334,9 +332,8 @@ export async function PUT(req: NextRequest) {
       userId: userUid,
       category: "invoice",
     });
-    const err = error as Error;
     return NextResponse.json(
-      { error: "Internal Server Error", details: err.message },
+      { error: "Internal Server Error" },
       { status: 500 }
     );
   }
@@ -433,9 +430,8 @@ export async function PATCH(req: NextRequest) {
       userId: userUid,
       category: "invoice",
     });
-    const err = error as Error;
     return NextResponse.json(
-      { error: "Internal Server Error", details: err.message },
+      { error: "Internal Server Error" },
       { status: 500 }
     );
   }

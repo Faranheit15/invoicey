@@ -16,10 +16,15 @@ interface LegacyUserData extends Omit<UserData, "providerIds"> {
   providerId?: string;
 }
 
+// Keys this app no longer writes. The Firebase ID and refresh tokens used to be
+// mirrored here in JS-readable cookies; dropping the writer does not drop the
+// cookie a returning browser already holds, and a Firebase refresh token never
+// expires on its own. Purged on every construction so the first page a returning
+// user opens destroys the leftover.
+const LEGACY_TOKEN_KEYS = ["access-token", "refresh-token"];
+
 export default class UserSessionManager {
   private keys = {
-    accessToken: "access-token",
-    refreshToken: "refresh-token",
     sessionToken: "session-token",
     sessionId: "session-id",
     username: "username",
@@ -27,26 +32,8 @@ export default class UserSessionManager {
     user: "user",
   };
 
-  get accessToken(): string | null {
-    return Cookies.get(this.keys.accessToken) || null;
-  }
-  set accessToken(value: string | null) {
-    if (value) {
-      Cookies.set(this.keys.accessToken, value, { secure: true, sameSite: "Strict" });
-    } else {
-      Cookies.remove(this.keys.accessToken);
-    }
-  }
-
-  get refreshToken(): string | null {
-    return Cookies.get(this.keys.refreshToken) || null;
-  }
-  set refreshToken(value: string | null) {
-    if (value) {
-      Cookies.set(this.keys.refreshToken, value, { secure: true, sameSite: "Strict" });
-    } else {
-      Cookies.remove(this.keys.refreshToken);
-    }
+  constructor() {
+    this.purgeLegacyTokens();
   }
 
   get sessionToken(): string | null {
@@ -139,12 +126,31 @@ export default class UserSessionManager {
     }
   }
 
+  // Guarded on `document` because client components still render on the server
+  // during SSR, where js-cookie and localStorage are unavailable.
+  private purgeLegacyTokens(): void {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    LEGACY_TOKEN_KEYS.forEach((key) => {
+      Cookies.remove(key);
+      if (typeof localStorage === "undefined") {
+        return;
+      }
+      try {
+        localStorage.removeItem(key);
+      } catch (e) {
+        console.log("An error occurred while purging a legacy token key:", e);
+      }
+    });
+  }
+
   // Clear all localStorage and cookies
   clearLocal = () => {
     localStorage.clear();
     Cookies.remove(this.keys.sessionId);
     Cookies.remove(this.keys.sessionToken);
-    Cookies.remove(this.keys.accessToken);
-    Cookies.remove(this.keys.refreshToken);
+    this.purgeLegacyTokens();
   };
 }

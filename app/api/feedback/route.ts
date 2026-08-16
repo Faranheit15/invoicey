@@ -4,25 +4,17 @@ import connectDB from "@/lib/mongodb";
 import Feedback from "@/models/Feedback";
 import { recordActivity, logRouteError } from "@/lib/server/log";
 import { FEEDBACK_CATEGORIES, MAX_FEEDBACK_LENGTH } from "@/lib/feedback";
+import { createRateLimiter } from "@/lib/server/rate-limit";
 
 const FEEDBACK_AUTH_MESSAGES = {
   EmailNotVerified: "Please verify your email before sending feedback.",
 } as const;
 
-const RATE_LIMIT = 10;
-const RATE_WINDOW_MS = 10 * 60 * 1000;
-const buckets = new Map<string, { count: number; resetAt: number }>();
-
-const rateLimited = (uid: string): boolean => {
-  const now = Date.now();
-  const bucket = buckets.get(uid);
-  if (!bucket || bucket.resetAt < now) {
-    buckets.set(uid, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return false;
-  }
-  bucket.count += 1;
-  return bucket.count > RATE_LIMIT;
-};
+const rateLimited = createRateLimiter({
+  namespace: "feedback",
+  limit: 10,
+  windowMs: 10 * 60 * 1000,
+});
 
 export async function POST(req: NextRequest) {
   let userUid: string;

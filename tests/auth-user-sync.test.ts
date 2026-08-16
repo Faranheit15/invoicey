@@ -4,6 +4,7 @@ import type { DecodedIdToken } from "firebase-admin/auth";
 // Capture what queries/mutations the sync issues, without a real database.
 let lastFindOneQuery: unknown = null;
 let existingUserToReturn: Record<string, unknown> | null = null;
+let lastWrittenPayload: Record<string, unknown> | null = null;
 const updateManyCalls: unknown[][] = [];
 
 const fakeUser = {
@@ -11,14 +12,14 @@ const fakeUser = {
     lastFindOneQuery = query;
     return existingUserToReturn;
   }),
-  create: mock(async (payload: Record<string, unknown>) => ({
-    _id: "new-id",
-    ...payload,
-  })),
-  findByIdAndUpdate: mock(async (_id: unknown, update: { $set: unknown }) => ({
-    _id,
-    ...(update.$set as Record<string, unknown>),
-  })),
+  create: mock(async (payload: Record<string, unknown>) => {
+    lastWrittenPayload = payload;
+    return { _id: "new-id", ...payload };
+  }),
+  findByIdAndUpdate: mock(async (_id: unknown, update: { $set: unknown }) => {
+    lastWrittenPayload = update.$set as Record<string, unknown>;
+    return { _id, ...(update.$set as Record<string, unknown>) };
+  }),
 };
 
 const fakeInvoice = {
@@ -51,6 +52,7 @@ const decoded = (over: Partial<DecodedIdToken> & { email_verified?: boolean }) =
 beforeEach(() => {
   lastFindOneQuery = null;
   existingUserToReturn = null;
+  lastWrittenPayload = null;
   updateManyCalls.length = 0;
 });
 
@@ -58,7 +60,6 @@ describe("syncUserWithMongo — account-linking safety", () => {
   it("does NOT match by email when the token email is unverified (uid-only lookup)", async () => {
     await syncUserWithMongo({
       decodedToken: decoded({ email_verified: false }),
-      idToken: "tok",
     });
     expect(lastFindOneQuery).toEqual({ uid: "attacker-uid" });
   });
@@ -66,7 +67,6 @@ describe("syncUserWithMongo — account-linking safety", () => {
   it("matches by uid OR email when the token email is verified", async () => {
     await syncUserWithMongo({
       decodedToken: decoded({ email_verified: true }),
-      idToken: "tok",
     });
     expect(lastFindOneQuery).toEqual({
       $or: [{ uid: "attacker-uid" }, { email: "victim@example.com" }],
@@ -79,7 +79,6 @@ describe("syncUserWithMongo — account-linking safety", () => {
     existingUserToReturn = null; // uid-only lookup finds nothing
     await syncUserWithMongo({
       decodedToken: decoded({ email_verified: false }),
-      idToken: "tok",
     });
     expect(updateManyCalls.length).toBe(0);
   });
@@ -92,11 +91,39 @@ describe("syncUserWithMongo — account-linking safety", () => {
     };
     await syncUserWithMongo({
       decodedToken: decoded({ email_verified: true }),
-      idToken: "tok",
     });
     expect(updateManyCalls[0]).toEqual([
       { userId: "victim-uid" },
       { $set: { userId: "attacker-uid" } },
     ]);
+  });
+});
+
+describe("syncUserWithMongo — no Firebase token is ever persisted", () => {
+  // A stored Firebase refresh token never expires, so a database dump would be a
+  // permanent takeover kit. Nothing reads these back; they must not come back.
+  it("omits accessToken/refreshToken when creating a user", async () => {
+    await syncUserWithMongo({ decodedToken: decoded({ email_verified: true }) });
+
+    expect(lastWrittenPayload).not.toBeNull();
+    expect(Object.keys(lastWrittenPayload!)).not.toContain("accessToken");
+    expect(Object.keys(lastWrittenPayload!)).not.toContain("refreshToken");
+  });
+
+  it("omits accessToken/refreshToken when updating an existing user", async () => {
+    existingUserToReturn = {
+      _id: "existing-row",
+      uid: "attacker-uid",
+      email: "victim@example.com",
+      // A token banked by the old code must not be read forward into the write.
+      refreshToken: "leftover-refresh-token",
+    };
+
+    await syncUserWithMongo({ decodedToken: decoded({ email_verified: true }) });
+
+    expect(lastWrittenPayload).not.toBeNull();
+    expect(Object.keys(lastWrittenPayload!)).not.toContain("accessToken");
+    expect(Object.keys(lastWrittenPayload!)).not.toContain("refreshToken");
+    expect(JSON.stringify(lastWrittenPayload)).not.toContain("leftover-refresh-token");
   });
 });

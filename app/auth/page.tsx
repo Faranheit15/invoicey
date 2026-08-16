@@ -46,8 +46,6 @@ interface SessionUser {
 
 interface SessionResponse {
   sessionToken?: string;
-  accessToken?: string;
-  refreshToken?: string;
   user?: SessionUser;
   error?: string;
 }
@@ -201,8 +199,6 @@ export default function AuthPage() {
 
     const userSessionManager = new UserSessionManager();
     userSessionManager.sessionToken = data.sessionToken;
-    userSessionManager.accessToken = data.accessToken || idToken;
-    userSessionManager.refreshToken = data.refreshToken || "";
 
     userSessionManager.user = {
       uid: data.user?.uid || user.uid,

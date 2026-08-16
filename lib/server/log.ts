@@ -124,6 +124,17 @@ const writeLog = async (input: LogInput): Promise<void> => {
   });
 };
 
+/**
+ * The awaited variant. `logEvent` defers past the response, which is right for
+ * telemetry and wrong for anything a later decision reads back: a caller that
+ * needs the row to exist before it does something expensive has to know the
+ * write landed. Unlike `logEvent` this one CAN throw — the caller is depending
+ * on the write, so it has to be told when it failed.
+ */
+export const logEventNow = async (input: LogInput): Promise<void> => {
+  await writeLog(input);
+};
+
 export const logEvent = (input: LogInput): void => {
   const run = () => {
     void writeLog(input).catch((err) => {

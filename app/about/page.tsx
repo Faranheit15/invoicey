@@ -23,7 +23,13 @@ const pillars = [
   {
     title: "Built for operators",
     description:
-      "Freelancers and small teams can manage status updates, edits, and payment records without tool sprawl.",
+      // Not "payment records": there is no payment tracking in the product.
+      // The only payment-adjacent things that exist are a `paymentInfo` free-
+      // text note printed on the invoice and a settle action that flips status
+      // to "paid" (app/api/invoices/route.ts). No amount received, no date
+      // paid, no method, no part payments — nothing that is a record of a
+      // payment. Say what the app actually does.
+      "Freelancers and independent operators can track invoice status, reopen and edit anything, and export it, without tool sprawl.",
     icon: <RocketIcon className="h-4 w-4" />,
   },
 ];

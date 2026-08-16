@@ -62,7 +62,7 @@ Three claims Invoicey can make truthfully that a general accounting suite or a W
 
 ## Evidence on Hand
 
-**What exists:** the product itself, working end to end. The invoice output, the editor's live preview, and the AI drafting flow are all real and demonstrable. `public/y-c.png` and `public/default-user-avatar.svg` are the only bespoke image assets.
+**What exists:** the product itself, working end to end. The invoice output, the editor's live preview, and the AI drafting flow are all real and demonstrable. `public/default-user-avatar.svg` is the only bespoke image asset.
 
 **What does not exist, and must never be fabricated:** this is a solo side project with no team and no customer base yet. There are no customers, no testimonials, no customer logos, no user counts, no invoice-volume numbers, no revenue figures, no press, no case studies, no awards, no team page, no funding, no SOC 2 or comparable certification. Any surface that would conventionally carry social proof must earn attention some other way — the product's own output, the AI flow, a live demo — rather than inventing proof.
 

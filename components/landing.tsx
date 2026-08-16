@@ -1,5 +1,4 @@
 import Link from "next/link";
-import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { BentoGrid, BentoGridItem } from "@/components/ui/aceternity/bento-grid";
 import { Atmosphere } from "@/components/ui/atmosphere";
@@ -52,26 +51,16 @@ const featureCards = [
   },
 ];
 
+// Every entry here has to be literally true and readable as a joke by someone
+// who does not write code. The previous first entry was "!Backed by" beside the
+// Y Combinator wordmark: the joke was the leading `!` as programmer negation,
+// which nobody outside that idiom parses, so it read as a real endorsement —
+// and it was unlicensed trademark use either way. Say it in words instead.
 const quips = [
   {
-    id: "yc",
+    id: "funding",
     className: "sm:col-span-2",
-    content: (
-      // flex-wrap and a shrinkable logo: at a 200% user font setting the
-      // nowrap label plus the scaled image forced this row to 437px inside a
-      // 311px column, and the page's overflow-hidden silently clipped the
-      // right edge of the whole hero rather than scrolling.
-      <span className="inline-flex flex-wrap items-center gap-2">
-        <span>!Backed by</span>
-        <Image
-          src="/y-c.png"
-          alt="Y Combinator"
-          width={132}
-          height={38}
-          className="h-6 w-auto max-w-full object-contain"
-        />
-      </span>
-    ),
+    content: "Not venture-backed. Nobody here needs you to upgrade.",
   },
   {
     id: "coffee",
@@ -109,11 +98,16 @@ export default function LandingPage() {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Button
-                asChild
-                size="lg"
-                className="bg-white text-slate-900 hover:bg-slate-100"
-              >
+              {/* No colour override: the default `Button` variant is
+                  near-black on light and near-white on dark (DESIGN.md,
+                  "Primary"), which is what every other primary control in the
+                  app uses. The old `bg-white ... hover:bg-slate-100` override
+                  had no dark variants and put a white face on this shell's
+                  `bg-slate-100` light ground — 1.10:1, below WCAG 1.4.11's 3:1
+                  for a control boundary, with no border or shadow to rescue it
+                  — and its hover was *exactly* the page background (1.00:1), so
+                  the page's single most important CTA vanished on hover. */}
+              <Button asChild size="lg">
                 <Link href="/auth" className="inline-flex items-center gap-2">
                   Start Free
                   <ArrowRightIcon className="h-4 w-4" />

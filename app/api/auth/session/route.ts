@@ -7,7 +7,6 @@ import { signSessionToken } from "@/lib/server/session-token";
 interface SessionPayload {
   idToken?: string;
   providerId?: string;
-  refreshToken?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -15,7 +14,7 @@ export async function POST(req: NextRequest) {
     await connectDB();
     ensureFirebaseAdmin();
 
-    const { idToken, providerId, refreshToken } = (await req.json()) as SessionPayload;
+    const { idToken, providerId } = (await req.json()) as SessionPayload;
 
     if (!idToken) {
       return NextResponse.json({ error: "ID token is required" }, { status: 400 });
@@ -38,19 +37,12 @@ export async function POST(req: NextRequest) {
 
     const { user, uid, email } = await syncUserWithMongo({
       decodedToken,
-      idToken,
       providerId,
-      refreshToken,
     });
 
     const sessionToken = await signSessionToken({ uid, email });
 
-    return NextResponse.json({
-      sessionToken,
-      user,
-      accessToken: idToken,
-      refreshToken: refreshToken || "",
-    });
+    return NextResponse.json({ sessionToken, user });
   } catch (error) {
     console.error("❌ Session Auth API Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

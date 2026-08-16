@@ -33,10 +33,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     const { uid } = await params;
     await connectDB();
 
-    const userDoc = (await User.findOne(
-      { uid },
-      { accessToken: 0, refreshToken: 0 }
-    ).lean()) as LeanUser | null;
+    const userDoc = (await User.findOne({ uid }).lean()) as LeanUser | null;
     if (!userDoc) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
@@ -140,10 +137,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       meta: { action, targetUid: uid },
     });
 
-    const updated = (await User.findOne(
-      { uid },
-      { accessToken: 0, refreshToken: 0 }
-    ).lean()) as LeanUser | null;
+    const updated = (await User.findOne({ uid }).lean()) as LeanUser | null;
     const rollups = await invoiceRollupForUsers([uid]);
 
     return NextResponse.json({

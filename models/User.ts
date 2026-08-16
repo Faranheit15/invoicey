@@ -25,8 +25,6 @@ const UserSchema = new Schema({
   },
   lastLoginAt: { type: Date, required: true },
   createdAt: { type: Date, default: Date.now },
-  accessToken: { type: String }, // Store if needed
-  refreshToken: { type: String }, // Store if needed
   // Authorization for the admin surface. Not `required` so legacy docs hydrate
   // and new docs get the defaults; admin reads use `.lean()`, which does NOT
   // apply schema defaults, so those code paths must `?? "user"` / `?? "active"`.

@@ -19,9 +19,10 @@ One-off data migrations, run manually against the configured `MONGODB_URI`:
 ```bash
 bun run migrate:provider-ids   # providerId (string) -> providerIds (array)
 bun run migrate:tax-to-gst     # tax -> cgst/sgst
+bun run migrate:purge-tokens   # $unset User.accessToken / User.refreshToken
 ```
 
-Both preserve the legacy field rather than dropping it, so legacy and current document shapes coexist in production data.
+The first two preserve the legacy field rather than dropping it, so legacy and current document shapes coexist in production data. `migrate:purge-tokens` is deliberately the opposite — the fields held Firebase ID and refresh tokens (the latter never expires), so destroying them is the entire point. It needs `strict: false` on the update because the paths no longer exist in the schema.
 
 **Tests use Bun's built-in runner** (`bun test`; `@types/bun` provides the types). Characterization tests live in `tests/` covering the money math, the legacy `tax` fallback, export escaping/CSV-injection, AI normalization, the API client, and the account-linking security rule. Run one file with `bun test tests/<name>.test.ts` or one case with `bun test -t "<name>"`. Verification is `bun run typecheck` (`tsc --noEmit`), `bun test`, `bun run lint`, plus the manual QA checklist in the README.
 
@@ -92,7 +93,9 @@ Every read filters `is_deleted: { $ne: true }`; deletion is a `PATCH` with `acti
 
 ### Auth
 
-The **Firebase ID token is the real authorization**. A `jsonwebtoken` HS256 session token is also minted and stored, but never verified server-side.
+The **Firebase ID token is the real authorization**, minted client-side by the Firebase SDK on every request. A `jose` HS256 session token is also minted and stored client-side, but never verified server-side.
+
+**No Firebase token is ever persisted.** `User.accessToken` / `User.refreshToken` and their JS-readable `access-token` / `refresh-token` cookies are gone — nothing read them back, and a stored refresh token never expires, so a database dump was a permanent account-takeover kit. `UserSessionManager`'s constructor purges those two legacy cookie/localStorage keys, because dropping the writer does not drop a cookie a returning browser already holds. Do not reintroduce a token field on `User`.
 
 Request auth is one shared helper: `requireUser(req)` in `lib/server/auth.ts`, imported by both API routes. It throws a typed `AuthError { code, status }` (no more sentinel-string matching), and `authErrorResponse(error, messages?)` maps it to a response with optional per-route copy. Do not re-copy this into new routes — import it.
 
@@ -130,7 +133,7 @@ Theming is custom (`lib/theme.ts`): `THEME_INIT_SCRIPT` is injected `beforeInter
 
 ## Gotchas
 
-- **Duplicate configs, one of each is dead.** `tailwind.config.js` is the real config (dark mode, shadcn HSL tokens, `tailwindcss-animate`); `tailwind.config.ts` is a stale stub. Likewise `postcss.config.js` vs `postcss.config.mjs`. Editing the shadowed file has no effect.
+- **One Tailwind config, one PostCSS config — keep it that way.** `tailwind.config.js` (dark mode, shadcn HSL tokens, `tailwindcss-animate`, the `./lib/**` glob) and `postcss.config.js` (`tailwindcss` + `autoprefixer`) are the only ones. The shadowed duplicates that used to sit beside them (`tailwind.config.ts`, a stub with none of the theme; `postcss.config.mjs`, which omitted `autoprefixer`) were deleted — verified via `postcss-load-config`, which resolves `postcss.config.js` ahead of `.mjs`, so the `.mjs` never ran and its missing autoprefixer never bit. Do not reintroduce a second config in another extension: whichever one loses is silently ignored, and for PostCSS the loser/winner flip drops every vendor prefix.
 - The Dockerfile builds with `bunx next build --webpack` deliberately for container stability, while `bun dev` uses Turbopack — build behavior differs between local dev and Docker.
 - Icons come from `@radix-ui/react-icons` in practice, though `components.json` declares lucide.
 - `connectDB()` now throws on connection failure (so one request 500s) instead of `process.exit(1)`. It still lacks a cached connection promise — deferred.

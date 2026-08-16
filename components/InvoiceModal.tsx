@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalCloseButton } from "@/components/ui/modal";
 import {
@@ -14,6 +14,7 @@ import {
   createInvoiceHtml,
 } from "@/lib/invoice-export";
 import { downloadBlob } from "@/lib/download";
+import { buildTotalsRows, resolveRecordAmounts } from "@/lib/invoice-domain";
 import { eventsApi } from "@/lib/api-client";
 import {
   InvoiceRecord,
@@ -49,14 +50,7 @@ export default function InvoiceModal({
   const titleId = useId();
   const currency = invoice.currency || "INR";
   const status = getInvoiceStatus(invoice);
-  const subtotal =
-    invoice.subtotal ??
-    invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0);
-  const discount = invoice.discount || 0;
-  const cgst = invoice.cgst ?? invoice.tax ?? 0;
-  const sgst = invoice.sgst || 0;
-  const convenienceCharge = invoice.convenienceCharge || 0;
-  const total = invoice.total || subtotal - discount + cgst + sgst + convenienceCharge;
+  const totalsRows = buildTotalsRows(resolveRecordAmounts(invoice));
   const showCompanyLogo = Boolean(invoice.companyLogo?.trim()) && !logoLoadFailed;
 
   useEffect(() => {
@@ -68,31 +62,104 @@ export default function InvoiceModal({
     eventsApi.emit({ event: "invoice.viewed", meta: { invoiceId: invoice._id } });
   }, [invoice._id]);
 
+  // The print frame outlives the click that made it — the dialog stays open for
+  // as long as the user wants — so it is tracked here rather than torn down on a
+  // timer. An earlier version removed it after 60s, which blanked the preview of
+  // anyone who spent longer than that in Save-as-PDF.
+  const printFrameRef = useRef<HTMLIFrameElement | null>(null);
+
+  const releasePrintFrame = useCallback(() => {
+    printFrameRef.current?.remove();
+    printFrameRef.current = null;
+  }, []);
+
+  useEffect(() => releasePrintFrame, [releasePrintFrame]);
+
   const exportPdf = () => {
     setExportError("");
-    const html = createInvoiceHtml(invoice, { autoPrint: true });
+    // Printed from a hidden same-document iframe, not a popup. `window.open`
+    // with `noopener` returns null on SUCCESS per spec, so the old popup-blocked
+    // branch fired every time — it reported a blocker that wasn't there and
+    // revoked the blob out from under the tab still loading it. An iframe cannot
+    // be blocked at all, and its load event is the real "it worked" signal the
+    // null-check was reaching for. The document is built without `autoPrint`
+    // because we drive `print()` ourselves once that signal arrives; letting the
+    // document print itself too would raise the dialog twice.
+    releasePrintFrame();
+
+    const html = createInvoiceHtml(invoice);
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const printableWindow = window.open(url, "_blank", "noopener,noreferrer");
-    if (!printableWindow) {
-      // Popup blockers are the single most common failure of this flow, and it
-      // used to fail silently — the user clicked and nothing at all happened.
-      URL.revokeObjectURL(url);
-      setExportError(
-        "Your browser blocked the print window. Allow pop-ups for this site, or download the HTML copy and print that."
-      );
-      return;
-    }
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.title = "Printable invoice";
+    // A blob: document inherits this origin, so anything that ever slipped past
+    // the export template's escaping would run with access to our storage. The
+    // template needs no script of its own — the parent drives print() — so the
+    // frame is sandboxed down to the two things this flow actually requires:
+    // same-origin (so contentWindow is reachable) and modals (so the print
+    // dialog can open). Scripts are not in the list.
+    frame.setAttribute("sandbox", "allow-same-origin allow-modals");
+    frame.style.cssText =
+      "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
 
-    const revokeObjectUrl = () => URL.revokeObjectURL(url);
-    printableWindow.addEventListener("afterprint", revokeObjectUrl, {
-      once: true,
-    });
-    setTimeout(revokeObjectUrl, 60_000);
-    eventsApi.emit({
-      event: "report.generated",
-      meta: { format: "pdf", invoiceId: invoice._id },
-    });
+    let urlRevoked = false;
+    const revokeUrl = () => {
+      if (urlRevoked) {
+        return;
+      }
+      urlRevoked = true;
+      URL.revokeObjectURL(url);
+    };
+    const fail = () => {
+      revokeUrl();
+      releasePrintFrame();
+      setExportError(
+        "Your browser could not open the printable copy. Download the HTML copy and print that instead."
+      );
+    };
+
+    // Only covers the load; once the document is up the print dialog may sit
+    // open for as long as the user wants it to.
+    const loadTimeout = setTimeout(fail, 15_000);
+
+    frame.onload = () => {
+      clearTimeout(loadTimeout);
+      const frameWindow = frame.contentWindow;
+      if (!frameWindow) {
+        fail();
+        return;
+      }
+
+      // Safe the moment the document exists: revoking a blob URL does not
+      // disturb a document already parsed from it, and the export template is
+      // self-contained, so nothing is fetched later. The FRAME is what has to
+      // survive — Chrome drops the preview if it leaves the DOM while the dialog
+      // is up — so it stays until afterprint, the next export supersedes it, or
+      // the modal unmounts. `afterprint` is unreliable outside Chrome, hence
+      // those two other releases rather than a timer.
+      revokeUrl();
+      printFrameRef.current = frame;
+      frameWindow.addEventListener("afterprint", releasePrintFrame, {
+        once: true,
+      });
+
+      try {
+        frameWindow.focus();
+        frameWindow.print();
+      } catch {
+        fail();
+        return;
+      }
+
+      eventsApi.emit({
+        event: "report.generated",
+        meta: { format: "pdf", invoiceId: invoice._id },
+      });
+    };
+    frame.onerror = fail;
+    frame.src = url;
+    document.body.appendChild(frame);
   };
 
   const exportHtml = () => {
@@ -322,30 +389,22 @@ export default function InvoiceModal({
               {/* The one place every figure in the invoice is compared against
                   its neighbours, so the whole ladder gets tabular figures. */}
               <div className="tabular w-full max-w-sm text-sm">
-                <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
-                  <span>Subtotal</span>
-                  <span>{formatCurrency(subtotal, currency)}</span>
-                </div>
-                <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
-                  <span>Discount</span>
-                  <span>- {formatCurrency(discount, currency)}</span>
-                </div>
-                <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
-                  <span>CGST</span>
-                  <span>{formatCurrency(cgst, currency)}</span>
-                </div>
-                <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
-                  <span>SGST</span>
-                  <span>{formatCurrency(sgst, currency)}</span>
-                </div>
-                <div className="flex justify-between py-1 text-slate-600 dark:text-slate-300">
-                  <span>Service Charge</span>
-                  <span>{formatCurrency(convenienceCharge, currency)}</span>
-                </div>
-                <div className="mt-2 flex justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-900 dark:border-slate-700 dark:text-slate-100">
-                  <span>Total</span>
-                  <span>{formatCurrency(total, currency)}</span>
-                </div>
+                {totalsRows.map((row) => (
+                  <div
+                    key={row.label}
+                    className={
+                      row.kind === "grand"
+                        ? "mt-2 flex justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-900 dark:border-slate-700 dark:text-slate-100"
+                        : "flex justify-between py-1 text-slate-600 dark:text-slate-300"
+                    }
+                  >
+                    <span>{row.label}</span>
+                    <span>
+                      {row.kind === "discount" ? "- " : ""}
+                      {formatCurrency(row.amount, currency)}
+                    </span>
+                  </div>
+                ))}
               </div>
             </section>
 

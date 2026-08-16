@@ -24,18 +24,12 @@ export async function POST(req: NextRequest) {
 
     const { user, uid, email } = await syncUserWithMongo({
       decodedToken,
-      idToken,
       providerId: "google.com",
     });
 
     const sessionToken = await signSessionToken({ uid, email });
 
-    return NextResponse.json({
-      sessionToken,
-      user,
-      accessToken: idToken,
-      refreshToken: "",
-    });
+    return NextResponse.json({ sessionToken, user });
   } catch (error) {
     console.error("❌ Google Auth API Error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

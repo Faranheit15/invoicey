@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser, authErrorResponse } from "@/lib/server/auth";
 import { logEvent, clientIp } from "@/lib/server/log";
+import { createRateLimiter } from "@/lib/server/rate-limit";
 
 /**
  * Low-trust client telemetry beacon. The browser generates invoice reports
@@ -16,21 +17,12 @@ import { logEvent, clientIp } from "@/lib/server/log";
 const ALLOWED_FORMATS = new Set(["pdf", "html", "csv", "json"]);
 const OBJECT_ID = /^[a-f0-9]{24}$/i;
 const MAX_BODY_BYTES = 4096;
-const RATE_LIMIT = 30;
-const RATE_WINDOW_MS = 60_000;
 
-const buckets = new Map<string, { count: number; resetAt: number }>();
-
-const rateLimited = (uid: string): boolean => {
-  const now = Date.now();
-  const bucket = buckets.get(uid);
-  if (!bucket || bucket.resetAt < now) {
-    buckets.set(uid, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return false;
-  }
-  bucket.count += 1;
-  return bucket.count > RATE_LIMIT;
-};
+const rateLimited = createRateLimiter({
+  namespace: "events",
+  limit: 30,
+  windowMs: 60_000,
+});
 
 const sanitizeMeta = (
   event: string,

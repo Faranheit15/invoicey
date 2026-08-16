@@ -13,9 +13,7 @@ const getAdminEmailAllowlist = (): string[] =>
 
 interface SyncUserInput {
   decodedToken: DecodedIdToken;
-  idToken: string;
   providerId?: string;
-  refreshToken?: string;
 }
 
 interface UserRecord {
@@ -26,7 +24,7 @@ interface UserRecord {
   avatar?: string;
   providerIds?: unknown;
   providerId?: unknown;
-  refreshToken?: string;
+  role?: unknown;
 }
 
 const normalizeProviderIds = (rawProviderIds: unknown, legacyProviderId: unknown): string[] => {
@@ -69,11 +67,29 @@ const normalizeEmail = (email: string | undefined): string => {
   return typeof email === "string" ? email.trim().toLowerCase() : "";
 };
 
+/**
+ * The sign-in routes return this to the browser, so it is an allow-list rather
+ * than the raw document. Dropping a field from `models/User.ts` does not remove
+ * it from documents already written — the persisted Firebase tokens live on in
+ * every pre-existing record until the purge migration runs — and a mongoose doc
+ * serialises whatever it was hydrated with. These six fields are exactly what
+ * `app/auth/page.tsx` reads.
+ */
+const serializeSyncedUser = (user: UserRecord | null) =>
+  user
+    ? {
+        uid: user.uid ?? "",
+        email: user.email ?? "",
+        name: user.name ?? "",
+        avatar: user.avatar ?? "",
+        providerIds: Array.isArray(user.providerIds) ? user.providerIds : [],
+        role: user.role === "admin" ? "admin" : "user",
+      }
+    : null;
+
 export const syncUserWithMongo = async ({
   decodedToken,
-  idToken,
   providerId: requestedProviderId,
-  refreshToken,
 }: SyncUserInput) => {
   const uid = decodedToken.uid;
   const email = normalizeEmail(decodedToken.email);
@@ -130,17 +146,12 @@ export const syncUserWithMongo = async ({
       : null;
   const nextAvatar = normalizeAvatarUrl(pictureFromToken || existingUser?.avatar);
 
-  const nextRefreshToken =
-    typeof refreshToken === "string" ? refreshToken : existingUser?.refreshToken || "";
-
   const updatePayload = {
     uid,
     email,
     name: nextName,
     avatar: nextAvatar,
     providerIds,
-    accessToken: idToken,
-    refreshToken: nextRefreshToken,
     lastLoginAt: new Date(),
   };
 
@@ -168,7 +179,7 @@ export const syncUserWithMongo = async ({
   recordActivity({ userId: uid, type: "login", meta: { providerId } });
 
   return {
-    user,
+    user: serializeSyncedUser(user),
     uid,
     email,
     providerId,

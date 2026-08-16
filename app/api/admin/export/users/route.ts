@@ -11,6 +11,32 @@ const CAP = 50_000;
 const toIso = (value: unknown): string =>
   value ? new Date(value as string).toISOString() : "";
 
+/**
+ * Both export formats are built from an explicit field list, never from the raw
+ * document. `.lean()` returns what the driver returned, not what the schema
+ * declares, so a field that has been dropped from `models/User.ts` is still
+ * present on every document written before the drop — deleting the field is not
+ * the same as deleting the data. This route used to project two such fields out
+ * by name (the persisted Firebase tokens); an allow-list is the version of that
+ * defence which also covers whatever gets added next.
+ */
+const toText = (value: unknown): string =>
+  typeof value === "string" ? value : "";
+
+const serializeUser = (user: Record<string, unknown>) => ({
+  uid: toText(user.uid),
+  email: toText(user.email),
+  name: toText(user.name),
+  avatar: toText(user.avatar),
+  role: toText(user.role) || "user",
+  status: toText(user.status) || "active",
+  providerIds: Array.isArray(user.providerIds)
+    ? user.providerIds.map(toText)
+    : [],
+  lastLoginAt: toIso(user.lastLoginAt),
+  createdAt: toIso(user.createdAt),
+});
+
 export async function GET(req: NextRequest) {
   let adminCtx: AdminContext;
   try {
@@ -24,15 +50,9 @@ export async function GET(req: NextRequest) {
     const format =
       new URL(req.url).searchParams.get("format") === "json" ? "json" : "csv";
 
-    // Tokens are always projected out of exports.
-    const users = await User.find(
-      {},
-      { accessToken: 0, refreshToken: 0 }
-    )
-      .limit(CAP + 1)
-      .lean();
+    const users = await User.find({}).limit(CAP + 1).lean();
     const truncated = users.length > CAP;
-    const data = truncated ? users.slice(0, CAP) : users;
+    const data = (truncated ? users.slice(0, CAP) : users).map(serializeUser);
 
     recordActivity({
       userId: adminCtx.uid,
@@ -64,11 +84,11 @@ export async function GET(req: NextRequest) {
         user.uid,
         user.email,
         user.name,
-        user.role ?? "user",
-        user.status ?? "active",
-        Array.isArray(user.providerIds) ? user.providerIds.join("|") : "",
-        toIso(user.lastLoginAt),
-        toIso(user.createdAt),
+        user.role,
+        user.status,
+        user.providerIds.join("|"),
+        user.lastLoginAt,
+        user.createdAt,
       ]),
     ];
 

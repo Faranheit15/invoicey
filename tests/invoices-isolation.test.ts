@@ -1,9 +1,17 @@
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { NextResponse } from "next/server";
+import * as realAuth from "@/lib/server/auth";
 
 // The logged-in user is always "A". The route derives userId from this, never
 // from the request body — that is the property under test.
+//
+// Bun's mock.module is process-global and replaces the WHOLE module, so a
+// factory returning only the two exports this file overrides makes every other
+// export vanish for every suite that runs after it — admin-auth.test.ts then
+// fails to import verifyRequestToken. Spreading the real module keeps the rest
+// intact and stops the suite being order-dependent.
 mock.module("@/lib/server/auth", () => ({
+  ...realAuth,
   requireUser: async () => "A",
   authErrorResponse: () =>
     NextResponse.json({ error: "unauthorized" }, { status: 401 }),

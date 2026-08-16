@@ -1,20 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser, authErrorResponse } from "@/lib/server/auth";
 import {
+  DRAFT_TOO_LARGE_MESSAGE,
   generateInvoiceAssistantResponse,
   validateAssistantRequest,
 } from "@/lib/ai/invoice-assistant/service";
+import { reserveDailyAiQuota } from "@/lib/ai/invoice-assistant/quota";
 import { logEvent } from "@/lib/server/log";
+import { consumeRateLimit } from "@/lib/server/rate-limit";
 
 const AI_AUTH_MESSAGES = {
   EmailNotVerified:
     "Please verify your email before using AI invoice assistant.",
 } as const;
 
+/**
+ * This is the only endpoint that spends real money per call, so it is capped
+ * twice. The burst limiter is in-memory and therefore per-lambda (see
+ * lib/server/rate-limit.ts) — it stops a runaway client loop, not a determined
+ * attacker. The durable per-user daily quota is the actual spend ceiling.
+ *
+ * 10/minute is far above any human pace: each turn is a ~2-20s round trip plus
+ * the time to read the reply and type the next instruction, so a user cannot
+ * reach it by hand, but a script hits it on the seventh second.
+ */
+const BURST_LIMIT = {
+  namespace: "ai-invoice-assistant",
+  limit: 10,
+  windowMs: 60_000,
+} as const;
+
+// The draft is JSON-capped in the service; this rejects the absurd payload
+// before Next has to buffer and parse it at all.
+const MAX_BODY_BYTES = 64 * 1024;
+
 const isClientError = (message: string) => {
   return (
     message.includes("Please enter a message") ||
-    message.includes("Invoice draft context is required")
+    message.includes("Invoice draft context is required") ||
+    message.includes(DRAFT_TOO_LARGE_MESSAGE)
   );
 };
 
@@ -85,9 +109,52 @@ export async function POST(req: NextRequest) {
     return authErrorResponse(error, AI_AUTH_MESSAGES);
   }
 
+  if (Number(req.headers.get("content-length") || 0) > MAX_BODY_BYTES) {
+    return NextResponse.json(
+      { error: DRAFT_TOO_LARGE_MESSAGE },
+      { status: 413 }
+    );
+  }
+
+  const burst = consumeRateLimit(BURST_LIMIT, userUid);
+  if (burst.limited) {
+    return NextResponse.json(
+      {
+        error:
+          "You're sending AI requests faster than we can bill for. Wait a moment and try again.",
+      },
+      {
+        status: 429,
+        headers: { "Retry-After": String(burst.retryAfterSeconds) },
+      }
+    );
+  }
+
   try {
     const rawPayload = await req.json();
     const request = validateAssistantRequest(rawPayload);
+
+    // Reserved here, after validation and immediately before the provider call,
+    // because the reservation IS the unit of spend: taking one for a request
+    // that gets rejected as malformed would bill the user's allowance for a call
+    // that never reaches Gemini.
+    const quota = await reserveDailyAiQuota(userUid);
+    if (quota.exceeded) {
+      logEvent({
+        level: "warn",
+        category: "ai",
+        event: "ai.quota_exceeded",
+        userId: userUid,
+        meta: { used: quota.used, limit: quota.limit },
+      });
+      return NextResponse.json(
+        {
+          error: `You've used your ${quota.limit} AI assistant requests for today. The limit resets on a rolling 24-hour basis — your invoice draft is untouched.`,
+        },
+        { status: 429 }
+      );
+    }
+
     const { response, telemetry } = await generateInvoiceAssistantResponse(
       request
     );
