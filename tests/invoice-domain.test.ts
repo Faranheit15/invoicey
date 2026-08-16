@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import {
+  buildLineItemColumns,
   buildTotalsRows,
   computeTotals,
   resolveRecordAmounts,
@@ -100,6 +101,10 @@ describe("computeTotals — legacy mode (pre-Phase-2 documents)", () => {
       roundOff: 0,
       total: 250,
       suppressedBecause: null,
+      // Item 7.3 widened InvoiceTotals by exactly one key. `toEqual` is exact
+      // and the exactness is the contract, so it is updated rather than
+      // loosened: `null` is what "this invoice has no TDS block" looks like.
+      tds: null,
     });
   });
 
@@ -849,9 +854,274 @@ describe("InvoiceTotals shape", () => {
           "suppressedBecause",
           "taxRows",
           "taxableValue",
+          "tds",
           "total",
         ].sort()
       );
     }
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Phase 2 part 2: GSTIN particulars and TDS                                   */
+/* -------------------------------------------------------------------------- */
+
+// Published, real GSTINs — the same vectors `tests/gstin.test.ts` pins, so a
+// break in the checksum shows up as one failure there rather than as noise here.
+const MAHARASHTRA_GSTIN = "27AAPFU0939F1ZV";
+const KARNATAKA_GSTIN = "29AAGCB7383J1Z4";
+
+describe("validateInvoice — GSTIN particulars (§2.3, §2.5)", () => {
+  const valid = {
+    companyName: "Acme",
+    billTo: "Client",
+    invoiceNumber: "INV-1",
+    invoiceDate: "2026-01-01",
+    dueDate: "2026-01-15",
+    items: [{ description: "Widget" }],
+  };
+
+  it("accepts an ABSENT GSTIN on both sides", () => {
+    // The majority case. Registration only becomes mandatory above the turnover
+    // thresholds, and a validator that rejected "" would force every
+    // unregistered user to invent one.
+    expect(validateInvoice(valid)).toBeNull();
+    expect(
+      validateInvoice({ ...valid, companyGstin: "", billToGstin: "" })
+    ).toBeNull();
+  });
+
+  it("rejects a supplier GSTIN that fails the checksum", () => {
+    expect(
+      validateInvoice({ ...valid, companyGstin: "27AAPFU0939F1ZW" })
+    ).toBe("Your GSTIN is not valid. Check the 15 characters.");
+  });
+
+  it("rejects a client GSTIN that fails the checksum", () => {
+    expect(validateInvoice({ ...valid, billToGstin: "29AAGCB7383J1Z9" })).toBe(
+      "The client's GSTIN is not valid."
+    );
+  });
+
+  it("accepts a lowercased, space-broken paste on both sides", () => {
+    expect(
+      validateInvoice({
+        ...valid,
+        companyGstin: " 27aapfu0939f 1zv ",
+        billToGstin: "29 AAGCB7383J 1Z4",
+      })
+    ).toBeNull();
+  });
+});
+
+describe("validateInvoice — the §5.9 state-prefix contradiction", () => {
+  const valid = {
+    companyName: "Acme",
+    billTo: "Client",
+    invoiceNumber: "INV-1",
+    invoiceDate: "2026-01-01",
+    dueDate: "2026-01-15",
+    items: [{ description: "Widget" }],
+  };
+
+  it("REJECTS a supplier state that disagrees with the GSTIN's first two digits", () => {
+    // Not auto-corrected: which of the two is wrong is unknowable from here,
+    // and the disagreement decides CGST+SGST versus IGST.
+    expect(
+      validateInvoice({
+        ...valid,
+        companyGstin: MAHARASHTRA_GSTIN, // 27
+        supplierStateCode: "29",
+        taxTreatment: "gst",
+      })
+    ).toBe("Your state must match the first two digits of your GSTIN.");
+  });
+
+  it("passes when they agree", () => {
+    expect(
+      validateInvoiceDetailed({
+        ...valid,
+        companyGstin: MAHARASHTRA_GSTIN,
+        supplierStateCode: "27",
+        placeOfSupplyStateCode: "27",
+        taxTreatment: "gst",
+      }).error
+    ).toBeNull();
+  });
+
+  it("fires for a composition dealer too — they hold an ordinary GSTIN", () => {
+    expect(
+      validateInvoice({
+        ...valid,
+        companyGstin: KARNATAKA_GSTIN, // 29
+        supplierStateCode: "27",
+        taxTreatment: "composition",
+      })
+    ).toBe("Your state must match the first two digits of your GSTIN.");
+  });
+
+  it("says nothing when either side is missing", () => {
+    expect(
+      validateInvoice({ ...valid, companyGstin: MAHARASHTRA_GSTIN })
+    ).toBeNull();
+    expect(validateInvoice({ ...valid, supplierStateCode: "27" })).toBeNull();
+  });
+
+  it("warns — but does not block — a tax invoice with no GSTIN on it", () => {
+    const result = validateInvoiceDetailed({
+      ...valid,
+      taxTreatment: "gst",
+      supplierStateCode: "29",
+      placeOfSupplyStateCode: "29",
+    });
+    expect(result.error).toBeNull();
+    expect(result.warnings).toEqual([
+      "A tax invoice should carry your GSTIN. Add it in your business profile.",
+    ]);
+  });
+});
+
+describe("TDS (item 7.3)", () => {
+  const base = {
+    items: [{ quantity: 1, unitPrice: 10_000, taxRatePercent: 18 }],
+    discount: 0,
+    convenienceCharge: 0,
+  };
+
+  it("is null unless a section is chosen", () => {
+    expect(computeTotals({ ...base, tax: derived() }).tds).toBeNull();
+    expect(
+      computeTotals({ ...base, tax: derived(), tds: { section: "none" } }).tds
+    ).toBeNull();
+  });
+
+  it("computes on the PRE-GST taxable value, never on the total", () => {
+    const t = computeTotals({
+      ...base,
+      tax: derived(),
+      tds: { section: "194J_professional" },
+    });
+    expect(t.taxableValue).toBe(10_000);
+    expect(t.total).toBe(11_800);
+    // 10% of 10,000 — not of 11,800, which would be 1,180 (CBDT 23/2017).
+    expect(t.tds?.amount).toBe(1_000);
+    expect(t.tds?.ratePercent).toBe(10);
+  });
+
+  it("NEVER changes the invoice total", () => {
+    const without = computeTotals({ ...base, tax: derived() });
+    const with194J = computeTotals({
+      ...base,
+      tax: derived(),
+      tds: { section: "194C" },
+    });
+    expect(with194J.total).toBe(without.total);
+    expect(with194J.subtotal).toBe(without.subtotal);
+    expect(with194J.taxableValue).toBe(without.taxableValue);
+  });
+
+  it("prefills the section's statutory rate and honors an override", () => {
+    expect(
+      computeTotals({ ...base, tax: derived(), tds: { section: "194C" } }).tds
+        ?.ratePercent
+    ).toBe(1);
+    expect(
+      computeTotals({
+        ...base,
+        tax: derived(),
+        tds: { section: "194C", ratePercent: 2 },
+      }).tds?.amount
+    ).toBe(200);
+  });
+
+  it("puts both rows AFTER Total, as info + grand", () => {
+    const rows = buildTotalsRows(
+      computeTotals({
+        ...base,
+        tax: derived(),
+        tds: { section: "194J_professional" },
+      })
+    );
+    expect(rows.map((row) => row.label)).toEqual([
+      "Subtotal",
+      "Discount",
+      "CGST @ 9%",
+      "SGST @ 9%",
+      "Service Charge",
+      "Total",
+      "Less: TDS @10% (194J / s.393 SN 11)",
+      "Net Payable",
+    ]);
+    const tds = rows.find((row) => row.label.startsWith("Less: TDS"));
+    expect(tds?.kind).toBe("info");
+    // Negative, because it is a deduction the CLIENT makes.
+    expect(tds?.amount).toBe(-1_000);
+    expect(rows.find((row) => row.label === "Total")?.amount).toBe(11_800);
+    expect(rows.find((row) => row.label === "Net Payable")).toEqual({
+      label: "Net Payable",
+      amount: 10_800,
+      kind: "grand",
+    });
+  });
+
+  it("works on a legacy document without disturbing its total", () => {
+    const t = computeTotals({
+      items: [{ quantity: 1, unitPrice: 1_000 }],
+      discount: 0,
+      cgst: 90,
+      sgst: 90,
+      convenienceCharge: 0,
+      tds: { section: "194J_technical" },
+    });
+    expect(t.total).toBe(1_180);
+    expect(t.roundOff).toBe(0);
+    expect(t.tds?.amount).toBe(20);
+  });
+
+  it("prefers a STORED deduction over a recomputed one (D3)", () => {
+    const record: InvoiceRecord = {
+      _id: "1",
+      userId: "u",
+      companyName: "Acme",
+      billTo: "Client",
+      invoiceNumber: "INV-1",
+      invoiceDate: "2026-01-01",
+      dueDate: "2026-01-15",
+      currency: "INR",
+      items: [{ name: "W", price: 10_000, quantity: 1 }],
+      convenienceCharge: 0,
+      total: 10_000,
+      createdAt: "2026-01-01",
+      tdsSection: "194J_professional",
+      tdsRatePercent: 10,
+      tdsAmount: 999,
+    };
+    expect(resolveRecordAmounts(record).tds?.amount).toBe(999);
+  });
+});
+
+describe("buildLineItemColumns lives here now, beside buildTotalsRows", () => {
+  it("is exported from lib/invoice-domain and drives all three renderers", () => {
+    const totals = computeTotals({
+      items: [{ quantity: 1, unitPrice: 100, taxRatePercent: 18 }],
+      discount: 0,
+      convenienceCharge: 0,
+      tax: derived(),
+    });
+    const columns = buildLineItemColumns({
+      items: [{ name: "W", quantity: 1, price: 100, hsnSac: "998314" }],
+      totals,
+      currency: "INR",
+    });
+    expect(columns.map((column) => column.key)).toEqual([
+      "index",
+      "description",
+      "hsnSac",
+      "quantity",
+      "unitPrice",
+      "taxRate",
+      "tax",
+      "amount",
+    ]);
   });
 });

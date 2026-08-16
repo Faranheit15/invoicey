@@ -188,3 +188,162 @@ describe("invoice per-user isolation", () => {
     expect(updateOneCalls[0][0]).toEqual({ _id: "inv-A", userId: "A" });
   });
 });
+
+/**
+ * The API's own GSTIN handling. These live in this file because it already owns
+ * the in-memory Invoice model and the route import; `normalizePayload` is not
+ * exported, and testing it through the real handler is the point — a rule that
+ * only holds in the editor is not enforced.
+ */
+describe("POST /api/invoices — GSTIN particulars", () => {
+  const MAHARASHTRA_GSTIN = "27AAPFU0939F1ZV";
+
+  const gstBody = {
+    ...validBody,
+    taxTreatment: "gst",
+    supplierStateCode: "27",
+    placeOfSupplyStateCode: "27",
+    items: [
+      {
+        description: "Consulting",
+        quantity: 1,
+        unitPrice: 10_000,
+        hsnSac: "998314",
+        taxRatePercent: 18,
+      },
+    ],
+  };
+
+  it("accepts an invoice with NO GSTIN at all", async () => {
+    // The majority case: below the registration thresholds there is nothing to
+    // put here, and the app must not force a fake one.
+    const res = await POST(makeReq("http://x/api/invoices", validBody));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { invoice: { companyGstin: string } };
+    expect(body.invoice.companyGstin).toBe("");
+  });
+
+  it("rejects a supplier GSTIN that fails the checksum", async () => {
+    const res = await POST(
+      makeReq("http://x/api/invoices", {
+        ...validBody,
+        companyGstin: "27AAPFU0939F1ZW",
+      })
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "Your GSTIN is not valid. Check the 15 characters.",
+    });
+  });
+
+  it("rejects a client GSTIN that fails the checksum", async () => {
+    const res = await POST(
+      makeReq("http://x/api/invoices", {
+        ...validBody,
+        billToGstin: "29AAGCB7383J1Z9",
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("stores a normalized GSTIN and the PAN derived from it", async () => {
+    const res = await POST(
+      makeReq("http://x/api/invoices", {
+        ...gstBody,
+        companyGstin: " 27aapfu0939f1zv ",
+        billToGstin: "29AAGCB7383J1Z4",
+        companyPan: "ZZZZZ9999Z", // loses to the GSTIN
+      })
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      invoice: { companyGstin: string; companyPan: string; billToGstin: string };
+    };
+    expect(body.invoice.companyGstin).toBe(MAHARASHTRA_GSTIN);
+    expect(body.invoice.companyPan).toBe("AAPFU0939F");
+    expect(body.invoice.billToGstin).toBe("29AAGCB7383J1Z4");
+  });
+
+  it("REJECTS a supplier state that contradicts the GSTIN's prefix (§5.9)", async () => {
+    // Server-side, not just in the editor. Auto-correcting would silently flip
+    // CGST+SGST to IGST (or back) on a document the client has to book.
+    const res = await POST(
+      makeReq("http://x/api/invoices", {
+        ...gstBody,
+        companyGstin: MAHARASHTRA_GSTIN, // 27
+        supplierStateCode: "29",
+        placeOfSupplyStateCode: "29",
+      })
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "Your state must match the first two digits of your GSTIN.",
+    });
+  });
+});
+
+describe("POST /api/invoices — TDS and the signature block", () => {
+  it("stores the derived deduction without touching the total", async () => {
+    const res = await POST(
+      makeReq("http://x/api/invoices", {
+        ...validBody,
+        items: [{ description: "Retainer", quantity: 1, unitPrice: 10_000 }],
+        tdsSection: "194J_professional",
+      })
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      invoice: {
+        total: number;
+        tdsAmount: number;
+        tdsRatePercent: number;
+        tdsSection: string;
+      };
+    };
+    expect(body.invoice.total).toBe(10_000);
+    expect(body.invoice.tdsAmount).toBe(1_000);
+    // The rate is stored RESOLVED, never as the 0 the client omitted.
+    expect(body.invoice.tdsRatePercent).toBe(10);
+  });
+
+  it("drops an unknown TDS section instead of storing it", async () => {
+    const res = await POST(
+      makeReq("http://x/api/invoices", {
+        ...validBody,
+        tdsSection: "194Z_invented",
+      })
+    );
+    const body = (await res.json()) as {
+      invoice: { tdsSection: string; tdsAmount: number };
+    };
+    expect(body.invoice.tdsSection).toBe("none");
+    expect(body.invoice.tdsAmount).toBe(0);
+  });
+
+  it("strips a signature image URL outside the protocol allowlist", async () => {
+    const res = await POST(
+      makeReq("http://x/api/invoices", {
+        ...validBody,
+        signatureLabel: "For Acme Co",
+        // eslint-disable-next-line no-script-url
+        signatureImageUrl: "javascript:alert(1)",
+      })
+    );
+    const body = (await res.json()) as {
+      invoice: { signatureLabel: string; signatureImageUrl: string };
+    };
+    expect(body.invoice.signatureLabel).toBe("For Acme Co");
+    expect(body.invoice.signatureImageUrl).toBe("");
+  });
+
+  it("keeps an https signature image", async () => {
+    const res = await POST(
+      makeReq("http://x/api/invoices", {
+        ...validBody,
+        signatureImageUrl: "https://cdn.example.com/sig.png",
+      })
+    );
+    const body = (await res.json()) as { invoice: { signatureImageUrl: string } };
+    expect(body.invoice.signatureImageUrl).toBe("https://cdn.example.com/sig.png");
+  });
+});

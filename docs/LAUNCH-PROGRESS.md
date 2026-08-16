@@ -91,14 +91,41 @@ findings, all fixed before the commit.
 
 ## Phase 2 — Make the document correct
 
-- [ ] 1. `taxTreatment`
-- [ ] 2. GSTIN fields + `lib/gstin.ts`
-- [ ] 3. Business profile
-- [ ] 4. Invoice numbering
-- [ ] 5. Place of supply + IGST
-- [ ] 6. Per-line HSN/SAC + UOM + tax rate
-- [ ] 7. Amount in words, `en-GB` dates, PAN + TDS, signature block, round-off
-- [ ] 8. Print CSS hardening
+- [x] 1. `taxTreatment`
+- [x] 2. GSTIN fields + `lib/gstin.ts`
+- [x] 3. Business profile
+- [x] 4. Invoice numbering
+- [x] 5. Place of supply + IGST
+- [x] 6. Per-line HSN/SAC + UOM + tax rate
+- [x] 7. Amount in words, `en-GB` dates, PAN + TDS, signature block, round-off
+- [x] 8. Print CSS hardening
+
+### Corrections Phase 2 made to the plan itself
+
+- `cgst`/`sgst` being `required: true` was a red herring — with `default: 0` that
+  validator can never fire. The forced ₹0.00 rows came from `buildTotalsRows`.
+- A server-side invoice counter is the wrong mechanism: it burns a number on
+  every abandoned draft, creating the Rule 46(b) gaps it was meant to prevent.
+  Suggestion reads the highest number in the FY; the unique index guarantees it.
+- The unique index must be **full**, not partial. Nothing is ever hard-deleted,
+  so a partial index lets a soft-deleted number be reissued while both records
+  are retained for 72 months.
+- The financial year must be derived as the civil date in **IST**, not UTC —
+  1 April 04:00 IST is 31 March 22:30 UTC, the previous FY's uniqueness scope.
+- §170 rounding applies in derived mode only. Applying it to legacy invoices
+  would change the total on documents clients already hold.
+- The AI must never set `taxTreatment` or `companyGstin`: a model inferring
+  "registered" could head an unregistered person's document "TAX INVOICE".
+
+### Found and fixed during Phase 2
+
+- [x] `toSafeImageUrl` accepted any `data:` URL, including `data:text/html` —
+      script execution, since the print path renders in a same-origin iframe
+- [x] Unescaped `row.label` in the totals table, safe only while every label was
+      a constant and unsafe the moment they carried computed rate suffixes
+- [x] Every module landed correctly and the invoice still had no GSTIN columns,
+      so neither party's GSTIN could print — caught only because it was flagged
+      rather than routed around
 
 ## Phase 3 — Make it worth coming back to
 

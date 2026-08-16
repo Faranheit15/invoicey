@@ -22,9 +22,18 @@ export interface AssistantConversationEntry {
  *    user's business profile, never asserted by a sentence. A model that could
  *    set it could turn an unregistered person's document into one headed "TAX
  *    INVOICE" — the exact shape §32 CGST exists to prevent.
- *  - **`companyGstin` / `billToGstin`.** No such column exists on the invoice
- *    (the GSTIN lives on the business profile), and "never invent a GSTIN" is
- *    easiest to enforce by giving the model nowhere to put one.
+ *  - **`companyGstin`.** The supplier's own registration is not a thing a
+ *    sentence asserts — it is copied from the business profile, which is the
+ *    only place it can be verified against the user's actual registration. A
+ *    model that could set it could also silently re-head an unregistered
+ *    person's document as a tax invoice via the derivation.
+ *
+ * `billToGstin` IS accepted, and is the one identity field that is: the client's
+ * GSTIN is a plausible thing to read out of "bill Nova Health, GSTIN
+ * 27AAPFU0939F1ZV". It carries its own checksum, so a hallucinated one does not
+ * survive `normalization.ts` — which is a stronger guarantee than any other
+ * string field in this patch has, and the reason it is safe to accept while
+ * `companyGstin` is not.
  *
  * The field set here must stay identical to `prompt.ts`, `normalization.ts` and
  * `apply-patch.ts` (CLAUDE.md). It does NOT have to match `InvoiceFormState`.
@@ -38,6 +47,8 @@ export interface InvoiceAssistantPatch {
   billTo?: string;
   billToEmail?: string;
   billToAddress?: string;
+  /** The CLIENT's GSTIN. Checksum-validated, and dropped outright if wrong. */
+  billToGstin?: string;
   invoiceNumber?: string;
   invoiceDate?: string;
   dueDate?: string;

@@ -2,9 +2,11 @@ import {
   MAX_ITEM_QUANTITY,
   MAX_ITEM_UNIT_PRICE,
   MAX_MONEY_VALUE,
+  MAX_TDS_RATE_PERCENT,
   clampToLimit,
   computeTotals,
   resolveTaxContext,
+  type TdsSection,
 } from "@/lib/invoice-domain";
 import {
   deriveSupplyKind,
@@ -15,6 +17,8 @@ import {
 } from "@/lib/gst-supply";
 import {
   isValidGstin,
+  normalizeGstin,
+  panFromGstin,
   stateCodeFromGstin,
   stateNameFromCode,
 } from "@/lib/gstin";
@@ -81,6 +85,24 @@ export interface InvoiceRecord {
   // --- Phase 2 GST fields. ALL optional: Mongo holds documents written by four
   // different versions of this app, and an ABSENT `taxTreatment` is what marks
   // a document as pre-Phase-2 (see `resolveTaxContext`).
+  /**
+   * Rule 46(a)/(e). STORED ON THE INVOICE, not read live from the business
+   * profile: an invoice is a historical record, and a user who later changes or
+   * surrenders a registration must not retroactively alter documents already
+   * issued to clients. Both optional — the unregistered case is the majority
+   * and stays first-class.
+   */
+  companyGstin?: string;
+  billToGstin?: string;
+  /** Derived from `companyGstin` when there is one; needed by TDS deductors. */
+  companyPan?: string;
+  /** Item 7.3. `tdsAmount` is derived and stored (design decision D3). */
+  tdsSection?: TdsSection;
+  tdsRatePercent?: number;
+  tdsAmount?: number;
+  /** Item 7.4. The image URL is an `<img src>` — allowlisted before storage. */
+  signatureLabel?: string;
+  signatureImageUrl?: string;
   taxTreatment?: TaxTreatment;
   /** Derived from `taxTreatment`, stored so the printed heading cannot drift. */
   documentType?: DocumentType;
@@ -147,7 +169,34 @@ export interface InvoiceGstFormFields {
  */
 export type InvoiceFormStateWithGst = InvoiceFormState;
 
-export interface InvoiceFormState extends InvoiceGstFormFields {
+/**
+ * The party-identity, TDS and signature fields, shared verbatim by the form
+ * state and the wire payload.
+ *
+ * They are NOT part of `InvoiceGstFormFields` on purpose: that block is spread
+ * onto the payload only when `taxTreatment` is defined (absence being the
+ * pre-Phase-2 marker), and a GSTIN, a PAN or a signature is not conditional on
+ * a document having been through the GST fields.
+ */
+export interface InvoiceIdentityFields {
+  /** Rule 46(a). Trimmed/upper-cased by the mapper, validated by the API. */
+  companyGstin: string;
+  /** Derived from `companyGstin` when valid; typed by hand otherwise. */
+  companyPan: string;
+  /** Rule 46(e). Blank whenever the client is unregistered or overseas. */
+  billToGstin: string;
+  /** Item 7.3. "none" prints nothing at all. */
+  tdsSection: TdsSection;
+  /** 0 means "use the section's statutory rate". */
+  tdsRatePercent: number;
+  /** Item 7.4. Blank falls back to `For <companyName>`. */
+  signatureLabel: string;
+  signatureImageUrl: string;
+}
+
+export interface InvoiceFormState
+  extends InvoiceGstFormFields,
+    InvoiceIdentityFields {
   companyName: string;
   companyEmail: string;
   companyPhone: string;
@@ -171,7 +220,9 @@ export interface InvoiceFormState extends InvoiceGstFormFields {
   paymentInfo: string;
 }
 
-export interface InvoicePayload extends Partial<InvoiceGstFormFields> {
+export interface InvoicePayload
+  extends Partial<InvoiceGstFormFields>,
+    InvoiceIdentityFields {
   /** Derived server-side from `taxTreatment`; sent only as a hint. */
   documentType?: DocumentType;
   /** Derived server-side from the geography; sent only as a hint. */
@@ -251,6 +302,14 @@ export interface InvoiceFormSeed {
   taxTreatment?: TaxTreatment;
   supplierStateCode?: string;
   lutArn?: string;
+  /**
+   * The supplier's own tax identity, copied onto each new invoice at the moment
+   * it is created. Copied rather than referenced: see `InvoiceRecord`.
+   */
+  companyGstin?: string;
+  companyPan?: string;
+  signatureLabel?: string;
+  signatureImageUrl?: string;
 }
 
 /**
@@ -273,6 +332,10 @@ export const profileToSeed = (
         taxTreatment?: TaxTreatment;
         supplierStateCode?: string;
         lutArn?: string;
+        companyGstin?: string;
+        companyPan?: string;
+        signatureLabel?: string;
+        signatureImageUrl?: string;
       }
     | null
     | undefined
@@ -292,6 +355,10 @@ export const profileToSeed = (
         taxTreatment: profile.taxTreatment || undefined,
         supplierStateCode: profile.supplierStateCode || undefined,
         lutArn: profile.lutArn || undefined,
+        companyGstin: profile.companyGstin || undefined,
+        companyPan: profile.companyPan || undefined,
+        signatureLabel: profile.signatureLabel || undefined,
+        signatureImageUrl: profile.signatureImageUrl || undefined,
       };
 
 export const createDefaultInvoiceFormState = (
@@ -328,6 +395,19 @@ export const createDefaultInvoiceFormState = (
     sgst: 0,
     convenienceCharge: 0,
     paymentInfo: seed.paymentInfo ?? "",
+
+    // Seller identity, copied off the profile. `companyPan` falls back to the
+    // GSTIN's own characters 3-12 (`panFromGstin`), so a registered user never
+    // types a PAN and the TDS block costs them nothing to fill in.
+    companyGstin: seed.companyGstin ?? "",
+    companyPan: seed.companyPan || panFromGstin(seed.companyGstin) || "",
+    // The client's GSTIN belongs to the client, not to the profile: it is asked
+    // per invoice and is blank by default.
+    billToGstin: "",
+    tdsSection: "none",
+    tdsRatePercent: 0,
+    signatureLabel: seed.signatureLabel ?? "",
+    signatureImageUrl: seed.signatureImageUrl ?? "",
 
     // A NEW invoice always has an explicit treatment: "none" until the profile
     // says otherwise. This is safe only because the editor no longer offers the
@@ -369,12 +449,17 @@ export const calculateInvoiceTotals = (
     sgst: number;
     discount: number;
     convenienceCharge: number;
-  } & Partial<InvoiceGstFormFields>
+  } & Partial<InvoiceGstFormFields> &
+    Partial<Pick<InvoiceIdentityFields, "tdsSection" | "tdsRatePercent">>
 ) =>
   computeTotals({
     items: form.items,
     discount: form.discount,
     convenienceCharge: form.convenienceCharge,
+    tds: {
+      section: form.tdsSection,
+      ratePercent: form.tdsRatePercent,
+    },
     tax: resolveTaxContext({
       taxTreatment: form.taxTreatment,
       reverseCharge: form.reverseCharge,
@@ -437,6 +522,15 @@ export const mapInvoiceRecordToFormState = (
     withPaymentOfTax: invoice.withPaymentOfTax ?? false,
     lutArn: invoice.lutArn ?? "",
     countryOfDestination: invoice.countryOfDestination ?? "",
+    // Read straight off the record, never re-derived from the current profile:
+    // re-opening an issued invoice must show the identity it was issued with.
+    companyGstin: invoice.companyGstin || "",
+    companyPan: invoice.companyPan || "",
+    billToGstin: invoice.billToGstin || "",
+    tdsSection: invoice.tdsSection ?? "none",
+    tdsRatePercent: toNumber(invoice.tdsRatePercent, 0),
+    signatureLabel: invoice.signatureLabel || "",
+    signatureImageUrl: invoice.signatureImageUrl || "",
     companyName: invoice.companyName || "",
     companyEmail: invoice.companyEmail || "",
     companyPhone: invoice.companyPhone || "",
@@ -505,8 +599,27 @@ export const mapFormStateToPayload = (
     gst.countryOfDestination = (form.countryOfDestination ?? "").trim();
   }
 
+  // Normalise, never reject: a GSTIN pasted out of a PDF arrives lowercased or
+  // split into groups, and every one of those is unambiguously the same
+  // identifier. Rejection is `validateInvoice`'s job (and the API's), exactly
+  // as the two responsibilities are split everywhere else in this file.
+  const companyGstin = normalizeGstin(form.companyGstin);
+  const billToGstin = normalizeGstin(form.billToGstin);
+
   return {
     ...gst,
+    companyGstin,
+    billToGstin,
+    // A valid GSTIN carries the PAN inside it and is the authority for it; a
+    // hand-typed PAN only survives when there is no GSTIN to contradict it.
+    companyPan: panFromGstin(companyGstin) || normalizeGstin(form.companyPan),
+    tdsSection: form.tdsSection ?? "none",
+    tdsRatePercent: clampToLimit(
+      toNumber(form.tdsRatePercent, 0),
+      MAX_TDS_RATE_PERCENT
+    ),
+    signatureLabel: (form.signatureLabel ?? "").trim(),
+    signatureImageUrl: (form.signatureImageUrl ?? "").trim(),
     companyName: form.companyName.trim(),
     companyEmail: form.companyEmail.trim(),
     companyPhone: form.companyPhone.trim(),
@@ -586,11 +699,12 @@ export const formatDateLong = formatCalendarDateLong;
 /**
  * §5.9's GSTIN-prefix rule, as a CALLER-SIDE check.
  *
- * It cannot live inside `validateInvoice`: the invoice document has no
- * `companyGstin` column (the GSTIN lives on the business profile), so the
- * validator has nothing to compare against. Callers that DO hold a GSTIN — the
- * editor, which fetched the profile to seed the form — pass it here right after
- * `validateInvoice` returns clean.
+ * The rule itself now lives in `validateInvoice`, which the API also runs: the
+ * invoice carries its own `companyGstin`, so the validator finally has
+ * something to compare against. This helper survives for the one case the
+ * validator cannot see — an invoice with no GSTIN of its own belonging to a
+ * user whose PROFILE has one (a draft opened before the profile was saved).
+ * The editor calls it with the profile's GSTIN as a fallback.
  *
  * All GSTIN knowledge comes from `lib/gstin.ts`; nothing here parses a GSTIN by
  * hand. A blank or invalid GSTIN is not this rule's business (the profile form

@@ -29,8 +29,13 @@ import {
   MAX_ITEM_QUANTITY,
   MAX_ITEM_UNIT_PRICE,
   MAX_MONEY_VALUE,
+  MAX_TDS_RATE_PERCENT,
+  TDS_SECTIONS,
+  buildLineItemColumns,
   buildTotalsRows,
+  tdsSpecFor,
   validateInvoiceDetailed,
+  type TdsSection,
 } from "@/lib/invoice-domain";
 import {
   COMPOSITION_BANNER,
@@ -51,14 +56,15 @@ import {
   GST_STATE_CODES,
   GST_STATE_PICKER_CODES,
   OTHER_COUNTRY_STATE_CODE,
+  isValidGstin,
+  panFromGstin,
 } from "@/lib/gstin";
-// buildLineItemColumns/Cells live in lib/invoice-export because this change set
-// may not edit lib/invoice-domain, which is where they belong next to
-// buildTotalsRows. They are pure — no DOM, no React — so the import direction is
-// the only thing odd about it. See the comment on the helper itself.
+// `buildLineItemColumns` now lives in lib/invoice-domain, beside
+// buildTotalsRows, and all three renderers read it from there.
+// `buildLineItemCells` stays here because it formats currency via lib/invoices,
+// which imports the domain module — see the note on the helper itself.
 import {
   buildLineItemCells,
-  buildLineItemColumns,
   exportEndorsementFor,
 } from "@/lib/invoice-export";
 import { amountInWordsIndian } from "@/lib/amount-in-words";
@@ -173,6 +179,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const [errorRetry, setErrorRetry] = useState<(() => void) | null>(null);
   const [saveStatus, setSaveStatus] = useState("");
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const [signatureLoadFailed, setSignatureLoadFailed] = useState(false);
   // Non-blocking advice from `validateInvoiceDetailed` — a wrong-LOOKING but
   // legal invoice must still save, so these are shown, never enforced.
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -291,6 +298,10 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   useEffect(() => {
     setLogoLoadFailed(false);
   }, [invoice.companyLogo]);
+
+  useEffect(() => {
+    setSignatureLoadFailed(false);
+  }, [invoice.signatureImageUrl]);
 
   // The two percent-mode effects that used to recompute `invoice.cgst` and
   // `invoice.sgst` from `subtotal x rate` are GONE, along with the %/₹ toggle
@@ -493,6 +504,8 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       invoiceDate: invoice.invoiceDate,
       dueDate: invoice.dueDate,
       items: invoice.items,
+      companyGstin: invoice.companyGstin,
+      billToGstin: invoice.billToGstin,
       taxTreatment: invoice.taxTreatment,
       supplyKind,
       supplierStateCode: invoice.supplierStateCode,
@@ -509,11 +522,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       return;
     }
 
-    // §5.9's GSTIN-prefix rule. It cannot live inside `validateInvoice` — the
-    // invoice document has no GSTIN column, the business profile owns it — so it
-    // runs here, where the profile has already been fetched.
+    // §5.9's GSTIN-prefix rule now lives inside `validateInvoice` (the invoice
+    // carries its own GSTIN), which is also where the API enforces it. This
+    // second call covers only the case the validator cannot see: a draft with
+    // no GSTIN of its own, belonging to a user whose PROFILE has one.
     const stateError = checkSupplierStateAgainstGstin({
-      companyGstin: profile?.companyGstin,
+      companyGstin: invoice.companyGstin || profile?.companyGstin,
       supplierStateCode: invoice.supplierStateCode,
       taxTreatment: invoice.taxTreatment,
     });
@@ -706,6 +720,8 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     ? TAX_SUPPRESSION_NOTES[totals.suppressedBecause]
     : "";
   const showCompanyLogo = Boolean(invoice.companyLogo.trim()) && !logoLoadFailed;
+  const showSignatureImage =
+    Boolean(invoice.signatureImageUrl.trim()) && !signatureLoadFailed;
 
   // A logo that fails to load is silent in the preview and on the printed
   // sheet, so say it here rather than letting the user discover it after send.
@@ -887,6 +903,68 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       />
                     )}
                   </Field>
+                  {/* Rule 46(a). Seeded from the business profile but stored
+                      ON THE INVOICE and editable here, because a user who
+                      later changes registration must be able to reprint an old
+                      document exactly as it was issued. Blank is a first-class
+                      answer: most users are below the registration threshold. */}
+                  <Field
+                    label="Your GSTIN"
+                    optional
+                    hint="15 characters. Leave blank if you are not registered."
+                  >
+                    {(field) => (
+                      <Input
+                        {...field}
+                        maxLength={15}
+                        placeholder="27AAPFU0939F1ZV"
+                        value={invoice.companyGstin}
+                        onChange={(event) => {
+                          const companyGstin = event.target.value.toUpperCase();
+                          markDirty();
+                          setInvoice((prev) => ({
+                            ...prev,
+                            companyGstin,
+                            // The PAN is characters 3-12 of the GSTIN, so a
+                            // registered user never types it. A hand-typed one
+                            // is only kept while there is no GSTIN to derive
+                            // from — a printed PAN that contradicts the printed
+                            // GSTIN is worse than no PAN at all.
+                            companyPan:
+                              panFromGstin(companyGstin) ||
+                              (isValidGstin(prev.companyGstin)
+                                ? ""
+                                : prev.companyPan),
+                          }));
+                        }}
+                      />
+                    )}
+                  </Field>
+                  <Field
+                    label="Your PAN"
+                    optional
+                    hint={
+                      panFromGstin(invoice.companyGstin)
+                        ? "Taken from your GSTIN."
+                        : "Clients deducting TDS need this."
+                    }
+                  >
+                    {(field) => (
+                      <Input
+                        {...field}
+                        maxLength={10}
+                        placeholder="AAPFU0939F"
+                        readOnly={Boolean(panFromGstin(invoice.companyGstin))}
+                        value={invoice.companyPan}
+                        onChange={(event) =>
+                          updateField(
+                            "companyPan",
+                            event.target.value.toUpperCase()
+                          )
+                        }
+                      />
+                    )}
+                  </Field>
                   <Field
                     label="Company logo URL"
                     optional
@@ -949,6 +1027,28 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                         value={invoice.billToEmail}
                         onChange={(event) =>
                           updateField("billToEmail", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                  {/* Rule 46(e). Blank whenever the client is unregistered or
+                      overseas, which is common and must stay unremarkable. */}
+                  <Field
+                    label="Client GSTIN"
+                    optional
+                    hint="Ask for it if the client is registered — they need it to claim input credit."
+                  >
+                    {(field) => (
+                      <Input
+                        {...field}
+                        maxLength={15}
+                        placeholder="29AAGCB7383J1Z4"
+                        value={invoice.billToGstin}
+                        onChange={(event) =>
+                          updateField(
+                            "billToGstin",
+                            event.target.value.toUpperCase()
+                          )
                         }
                       />
                     )}
@@ -1307,6 +1407,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                           setInvoice((prev) => ({
                             ...prev,
                             taxTreatment: profile?.taxTreatment ?? "none",
+                            // The identity comes across too, or the migrated
+                            // document would be headed TAX INVOICE with no
+                            // GSTIN under it.
+                            companyGstin:
+                              prev.companyGstin || profile?.companyGstin || "",
+                            companyPan:
+                              prev.companyPan || profile?.companyPan || "",
                             supplierStateCode:
                               prev.supplierStateCode ||
                               profile?.supplierStateCode ||
@@ -1330,8 +1437,10 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     <div className="space-y-1">
                       <p className="font-medium text-slate-800 dark:text-slate-100">
                         {DOCUMENT_TITLES[documentType]}
-                        {profile?.companyGstin
-                          ? ` · GSTIN ${profile.companyGstin}`
+                        {invoice.companyGstin || profile?.companyGstin
+                          ? ` · GSTIN ${
+                              invoice.companyGstin || profile?.companyGstin
+                            }`
                           : ""}
                       </p>
                       <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
@@ -1550,6 +1659,107 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   </Field>
                 </div>
               </section>
+
+              {/* TDS and the signature block (item 7).
+                  TDS is the CLIENT's deduction: it is printed so both sides
+                  agree on what will arrive, and it never changes the invoice
+                  total. See `buildTotalsRows`. */}
+              <section className="space-y-3">
+                <MicroLabel as="h2" variant="section">
+                  TDS &amp; Signature
+                </MicroLabel>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field
+                    label="TDS section"
+                    optional
+                    hint="Deducted by the client. It does not reduce this invoice."
+                  >
+                    {(field, labelId) => (
+                      <SelectField
+                        {...field}
+                        aria-labelledby={`${labelId} ${field.id}`}
+                        value={invoice.tdsSection}
+                        onValueChange={(value) => {
+                          const tdsSection = value as TdsSection;
+                          markDirty();
+                          setInvoice((prev) => ({
+                            ...prev,
+                            tdsSection,
+                            // Prefill the statutory rate, overridable below. A
+                            // 0 here would print "TDS @0%", so the section's
+                            // own rate is the only sensible landing value.
+                            tdsRatePercent:
+                              tdsSpecFor(tdsSection)?.ratePercent ?? 0,
+                          }));
+                        }}
+                        options={[
+                          { value: "none", label: "No TDS" },
+                          ...TDS_SECTIONS.map((spec) => ({
+                            value: spec.value,
+                            label: spec.label,
+                          })),
+                        ]}
+                        className="text-slate-900 dark:text-slate-100"
+                      />
+                    )}
+                  </Field>
+                  {invoice.tdsSection === "none" ? null : (
+                    <Field
+                      label="TDS rate %"
+                      hint="On the pre-GST value, per CBDT Circular 23/2017."
+                    >
+                      {(field) => (
+                        <NumericInput
+                          {...field}
+                          min={0}
+                          max={MAX_TDS_RATE_PERCENT}
+                          placeholder="10"
+                          value={invoice.tdsRatePercent}
+                          onValueChange={(tdsRatePercent) =>
+                            updateField("tdsRatePercent", tdsRatePercent)
+                          }
+                        />
+                      )}
+                    </Field>
+                  )}
+                  <Field
+                    label="Signature label"
+                    optional
+                    hint="Defaults to “For <your company>”."
+                  >
+                    {(field) => (
+                      <Input
+                        {...field}
+                        maxLength={TEXT_FIELD_MAX}
+                        placeholder={`For ${invoice.companyName || "your company"}`}
+                        value={invoice.signatureLabel}
+                        onChange={(event) =>
+                          updateField("signatureLabel", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                  <Field
+                    label="Signature image URL"
+                    optional
+                    hint="A public https:// link to a signature image."
+                  >
+                    {(field) => (
+                      <Input
+                        {...field}
+                        type="url"
+                        inputMode="url"
+                        maxLength={URL_FIELD_MAX}
+                        placeholder="https://acme.studio/signature.png"
+                        value={invoice.signatureImageUrl}
+                        onChange={(event) =>
+                          updateField("signatureImageUrl", event.target.value)
+                        }
+                      />
+                    )}
+                  </Field>
+                </div>
+              </section>
             </CardContent>
           </Card>
 
@@ -1613,6 +1823,26 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     <p className="text-xs leading-relaxed whitespace-pre-line text-slate-600 dark:text-slate-300">
                       {invoice.companyAddress || "Company address"}
                     </p>
+                    {/* Rule 46(a)/(e): each party's GSTIN sits with that
+                        party's name, which is where a reader looks for it.
+                        Omitted entirely when blank — an unregistered supplier's
+                        document should not mention GSTIN at all. */}
+                    {invoice.companyGstin ? (
+                      <p className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-200">
+                        <span className="text-slate-500 dark:text-slate-400">
+                          GSTIN{" "}
+                        </span>
+                        {invoice.companyGstin}
+                      </p>
+                    ) : null}
+                    {invoice.companyPan ? (
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                        <span className="text-slate-500 dark:text-slate-400">
+                          PAN{" "}
+                        </span>
+                        {invoice.companyPan}
+                      </p>
+                    ) : null}
                   </div>
                   <div>
                     <MicroLabel as="p" variant="section">
@@ -1624,6 +1854,14 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     <p className="text-xs leading-relaxed whitespace-pre-line text-slate-600 dark:text-slate-300">
                       {invoice.billToAddress || "Client address"}
                     </p>
+                    {invoice.billToGstin ? (
+                      <p className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-200">
+                        <span className="text-slate-500 dark:text-slate-400">
+                          GSTIN{" "}
+                        </span>
+                        {invoice.billToGstin}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -1749,7 +1987,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       className={
                         row.kind === "grand"
                           ? "flex items-center justify-between border-t border-slate-200 pt-2 text-base font-semibold text-slate-900 dark:border-slate-700 dark:text-slate-100"
-                          : "flex items-center justify-between text-slate-600 dark:text-slate-300"
+                          : row.kind === "info"
+                            ? // Non-arithmetic: quieter than a real line, so it
+                              // cannot read as a reduction of the total.
+                              "flex items-center justify-between text-xs text-slate-500 dark:text-slate-400"
+                            : "flex items-center justify-between text-slate-600 dark:text-slate-300"
                       }
                     >
                       <span>{row.label}</span>
@@ -1780,9 +2022,20 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     so it does not promise otherwise. */}
                 <div className="border-t border-slate-200 pt-3 text-right text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
                   <p className="text-slate-700 dark:text-slate-200">
-                    For {invoice.companyName || "your company"}
+                    {invoice.signatureLabel ||
+                      `For ${invoice.companyName || "your company"}`}
                   </p>
-                  <p className="mt-6">Authorised Signatory</p>
+                  {showSignatureImage ? (
+                    <img
+                      src={invoice.signatureImageUrl}
+                      alt="Signature"
+                      className="ml-auto mt-2 max-h-16 max-w-[200px] object-contain"
+                      onError={() => setSignatureLoadFailed(true)}
+                    />
+                  ) : null}
+                  <p className={showSignatureImage ? "mt-2" : "mt-6"}>
+                    Authorised Signatory
+                  </p>
                   <p className="mt-1">
                     This is a computer-generated invoice and does not require a
                     signature.

@@ -12,16 +12,24 @@ import {
   type TaxSuppressionReason,
   type TaxTreatment,
 } from "@/lib/gst-supply";
+import {
+  isValidGstin,
+  normalizeGstin,
+  stateCodeFromGstin,
+} from "@/lib/gstin";
 
 /**
  * Invoice domain: the single source of truth for the money formula, the display
  * amount resolution (including the legacy `tax` fallback), the ordered totals
- * rows shared by the live preview and the export, and invoice validation.
+ * rows shared by the live preview and the export, the line-item column list
+ * shared by all three renderers, and invoice validation.
  *
  * This module imports only TYPES from lib/invoices (erased at compile time), so
  * lib/invoices can import computeTotals from here without a runtime cycle.
- * `lib/gst-supply` is a real runtime import, and is allowed because that module
- * imports nothing from this one — the graph stays acyclic in one direction.
+ * `lib/gst-supply` and `lib/gstin` are real runtime imports, and are allowed
+ * because neither module imports anything from this one — the graph stays
+ * acyclic in one direction. All GSTIN knowledge (regex, mod-36 checksum, state
+ * table, PAN extraction) comes from `lib/gstin`; never re-implement any of it.
  */
 
 export const round2 = (value: number): number => Number((value || 0).toFixed(2));
@@ -52,6 +60,76 @@ export const MAX_MONEY_VALUE = 100_000_000;
 /** Clamp a money-ish number into [0, limit]; NaN and friends collapse to 0. */
 export const clampToLimit = (value: number, limit: number, floor = 0): number =>
   Math.min(limit, Math.max(floor, Number.isFinite(value) ? value : floor));
+
+/* -------------------------------------------------------------------------- */
+/* TDS (item 7.3)                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The withholding sections an Indian client actually deducts under when paying
+ * a freelancer or a small firm. "none" is the default and means "print nothing".
+ */
+export type TdsSection =
+  | "none"
+  | "194J_professional"
+  | "194J_technical"
+  | "194C";
+
+export interface TdsSectionSpec {
+  value: Exclude<TdsSection, "none">;
+  /** Picker copy. */
+  label: string;
+  /**
+   * What gets PRINTED beside the amount. FY 2026-27 renumbers 194J to
+   * "s.393 SN 11" and 194C to "s.393 SN 6"; that renumbering is marked
+   * UNVERIFIED in the research, so both the familiar and the new citation are
+   * printed together — a reader who knows either one can follow the line.
+   */
+  printedCode: string;
+  /** Statutory rate, prefilled and overridable. */
+  ratePercent: number;
+}
+
+export const TDS_SECTIONS: readonly TdsSectionSpec[] = [
+  {
+    value: "194J_professional",
+    label: "194J — professional fees (10%)",
+    printedCode: "194J / s.393 SN 11",
+    ratePercent: 10,
+  },
+  {
+    value: "194J_technical",
+    label: "194J — technical services (2%)",
+    printedCode: "194J / s.393 SN 11",
+    ratePercent: 2,
+  },
+  {
+    value: "194C",
+    label: "194C — contract work (1% / 2%)",
+    printedCode: "194C / s.393 SN 6",
+    ratePercent: 1,
+  },
+];
+
+/** A rate ceiling, not a rule: 20% is the no-PAN penal rate and 30% covers it. */
+export const MAX_TDS_RATE_PERCENT = 30;
+
+export const tdsSpecFor = (
+  section: TdsSection | undefined
+): TdsSectionSpec | null =>
+  TDS_SECTIONS.find((spec) => spec.value === section) ?? null;
+
+/**
+ * The resolved TDS line. `amount` is the client's deduction, NOT a reduction of
+ * the invoice — see the note on `buildTotalsRows`.
+ */
+export interface TdsInfo {
+  section: Exclude<TdsSection, "none">;
+  ratePercent: number;
+  amount: number;
+  /** Fully-built row label, so the three renderers cannot word it differently. */
+  label: string;
+}
 
 /** @deprecated Use `TotalsLineInput`. Kept so older call sites keep compiling. */
 export interface LineItemAmount {
@@ -104,6 +182,11 @@ export interface TotalsInput {
   cgst?: number;
   /** @deprecated Flat legacy amounts. Present so existing call sites compile. */
   sgst?: number;
+  /**
+   * The client's withholding. Absent (or `"none"`) means no TDS block at all.
+   * It never enters the money formula — see `buildTotalsRows`.
+   */
+  tds?: { section?: TdsSection; ratePercent?: number };
 }
 
 export interface ComputedLine {
@@ -147,6 +230,14 @@ export interface InvoiceTotals {
   total: number;
   /** Drives the explanatory line under the totals. */
   suppressedBecause: TaxSuppressionReason | null;
+  /**
+   * The client's TDS deduction, or `null`. Deliberately OUTSIDE `total`: TDS is
+   * withheld by the recipient and paid to the government on the supplier's
+   * behalf, so the invoice's legal value is unchanged by it. It rides inside
+   * `InvoiceTotals` (design decision D1) so every renderer picks the two rows
+   * up from `buildTotalsRows` with no call-site edit.
+   */
+  tds: TdsInfo | null;
 }
 
 const ZERO_LINE_TAX: LineTax = { cgst: 0, sgst: 0, igst: 0 };
@@ -370,6 +461,31 @@ export const computeTotals = (input: TotalsInput): InvoiceTotals => {
     }
   }
 
+  // 10. TDS. Computed on the PRE-GST taxable value, never on the total (CBDT
+  // Circular 23/2017): the client withholds against the value of the supply,
+  // not against the tax the government is already collecting through GST.
+  // Nothing above this line reads `tds`, which is the point — the deduction
+  // cannot move `total`.
+  const tdsSpec = tdsSpecFor(input.tds?.section);
+  let tds: TdsInfo | null = null;
+  if (tdsSpec) {
+    // A 0 (or absent) rate means "use the section's statutory rate", not "zero
+    // deduction": choosing a section IS the request to deduct, and a form that
+    // has not been through the rate field yet carries 0. A genuine zero
+    // deduction is expressed by leaving the section on "none".
+    const requestedRate = input.tds?.ratePercent;
+    const ratePercent =
+      Number.isFinite(requestedRate) && (requestedRate as number) > 0
+        ? clampToLimit(requestedRate as number, MAX_TDS_RATE_PERCENT)
+        : tdsSpec.ratePercent;
+    tds = {
+      section: tdsSpec.value,
+      ratePercent,
+      amount: round2((taxableValue * ratePercent) / 100),
+      label: `Less: TDS @${formatRate(ratePercent)}% (${tdsSpec.printedCode})`,
+    };
+  }
+
   const lines: ComputedLine[] = items.map((_, index) => ({
     gross: gross[index],
     lineDiscount: lineDiscounts[index],
@@ -392,6 +508,7 @@ export const computeTotals = (input: TotalsInput): InvoiceTotals => {
     roundOff,
     total,
     suppressedBecause,
+    tds,
   };
 };
 
@@ -488,6 +605,7 @@ export const resolveRecordAmounts = (invoice: InvoiceRecord): InvoiceTotals => {
     discount: invoice.discount ?? 0,
     convenienceCharge: invoice.convenienceCharge ?? 0,
     tax: taxContextForRecord(invoice),
+    tds: { section: invoice.tdsSection, ratePercent: invoice.tdsRatePercent },
   });
 
   return {
@@ -495,10 +613,22 @@ export const resolveRecordAmounts = (invoice: InvoiceRecord): InvoiceTotals => {
     subtotal: invoice.subtotal ?? computed.subtotal,
     total: invoice.total ?? computed.total,
     roundOff: invoice.roundOff ?? computed.roundOff,
+    // Same D3 discipline as the amounts above: a stored deduction wins, so a
+    // later change to the section's statutory rate cannot restate a figure the
+    // client has already withheld and deposited.
+    tds: computed.tds
+      ? { ...computed.tds, amount: invoice.tdsAmount ?? computed.tds.amount }
+      : null,
   };
 };
 
-export type TotalsRowKind = "line" | "discount" | "grand";
+/**
+ * `"info"` is a NON-ARITHMETIC row: it is displayed inside the totals ladder but
+ * takes no part in the money formula. TDS is the only one today, and it is the
+ * reason the kind exists — the deduction is made by the client, so showing it as
+ * an ordinary line would imply the invoice is worth less than its Total.
+ */
+export type TotalsRowKind = "line" | "discount" | "grand" | "info";
 
 export interface TotalsRow {
   label: string;
@@ -547,7 +677,146 @@ export const buildTotalsRows = (amounts: InvoiceTotals): TotalsRow[] => {
   }
 
   rows.push({ label: "Total", amount: amounts.total, kind: "grand" });
+
+  // Both rows sit AFTER Total, and Total is untouched: the legal value of the
+  // invoice is what the supply is worth, and TDS is the client's obligation to
+  // withhold out of that value and deposit against the supplier's PAN. Netting
+  // it into Total would understate the invoice in the client's books and in
+  // every GST return derived from it.
+  if (amounts.tds) {
+    rows.push({
+      label: amounts.tds.label,
+      amount: -amounts.tds.amount,
+      kind: "info",
+    });
+    rows.push({
+      label: "Net Payable",
+      amount: round2(amounts.total - amounts.tds.amount),
+      kind: "grand",
+    });
+  }
+
   return rows;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Shared line-item columns                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The line-item table's columns, as a data structure every renderer reads.
+ *
+ * This is `buildTotalsRows`' sibling and lives here for the same reason: item 6
+ * added four columns to a table that exists twice in JSX (the editor preview,
+ * the view modal) and once as a raw HTML string (the export, which the CSV also
+ * reads). Without a shared column list those renderings disagree about which
+ * columns exist, in what order, and what an empty one means.
+ *
+ * It briefly lived in `lib/invoice-export.ts` only because the change set that
+ * introduced it could not edit this file; the modal was the renderer that paid
+ * for that, and it has been moved here and routed through.
+ *
+ * `buildLineItemCells` stays in `lib/invoice-export.ts`: it formats currency via
+ * `lib/invoices`, which imports this module, and a runtime import back would
+ * close the cycle this module's header rule exists to prevent.
+ */
+export type LineItemColumnKey =
+  | "index"
+  | "description"
+  | "hsnSac"
+  | "unit"
+  | "quantity"
+  | "unitPrice"
+  | "discount"
+  | "taxRate"
+  | "tax"
+  | "amount";
+
+export interface LineItemColumn {
+  key: LineItemColumnKey;
+  label: string;
+  align: "left" | "right";
+  /**
+   * Print hint. Exactly one column wraps (the description); everything else is
+   * `white-space: nowrap` so an eight-column A4 table cannot collapse into
+   * unreadable slivers. Item 8(6).
+   */
+  wrap: boolean;
+}
+
+/** Accepts a DB item (`name`/`price`) or a form item (`description`/`unitPrice`). */
+export interface LineItemSource {
+  name?: string;
+  description?: string;
+  quantity?: number;
+  price?: number;
+  unitPrice?: number;
+  hsnSac?: string;
+  unit?: string;
+}
+
+export interface LineItemTableInput {
+  items: LineItemSource[];
+  totals: InvoiceTotals;
+  currency: string;
+}
+
+const ALL_LINE_ITEM_COLUMNS: LineItemColumn[] = [
+  { key: "index", label: "#", align: "left", wrap: false },
+  { key: "description", label: "Description", align: "left", wrap: true },
+  { key: "hsnSac", label: "HSN/SAC", align: "left", wrap: false },
+  { key: "unit", label: "UOM", align: "left", wrap: false },
+  { key: "quantity", label: "Qty", align: "right", wrap: false },
+  { key: "unitPrice", label: "Unit Price", align: "right", wrap: false },
+  { key: "discount", label: "Discount", align: "right", wrap: false },
+  { key: "taxRate", label: "Rate", align: "right", wrap: false },
+  { key: "tax", label: "Tax", align: "right", wrap: false },
+  { key: "amount", label: "Amount", align: "right", wrap: false },
+];
+
+const hasText = (value: string | undefined): boolean =>
+  typeof value === "string" && value.trim().length > 0;
+
+/**
+ * Which columns this invoice actually needs.
+ *
+ * An optional column appears only when at least one line populates it. A column
+ * of empty cells is worse than no column at A4 width (item 8(6)), and an
+ * "HSN/SAC" heading over eight blanks reads as a document that forgot to fill
+ * itself in rather than one that never needed the field.
+ */
+export const buildLineItemColumns = (
+  input: LineItemTableInput
+): LineItemColumn[] => {
+  const lines = input.totals.lines ?? [];
+  const present = new Set<LineItemColumnKey>([
+    "index",
+    "description",
+    "quantity",
+    "unitPrice",
+    "amount",
+  ]);
+
+  if (input.items.some((item) => hasText(item.hsnSac))) {
+    present.add("hsnSac");
+  }
+  if (input.items.some((item) => hasText(item.unit))) {
+    present.add("unit");
+  }
+  if (lines.some((line) => line.lineDiscount > 0)) {
+    present.add("discount");
+  }
+  if (lines.some((line) => line.ratePercent > 0)) {
+    present.add("taxRate");
+  }
+  // The per-line tax column tracks the TOTALS block: if no tax row is printed
+  // (unregistered, composition, reverse charge, zero-rated under LUT) then no
+  // tax was charged, and a per-line tax column of zeros would contradict that.
+  if ((input.totals.taxRows ?? []).length > 0) {
+    present.add("tax");
+  }
+
+  return ALL_LINE_ITEM_COLUMNS.filter((column) => present.has(column.key));
 };
 
 export interface ValidatableInvoiceItem {
@@ -564,6 +833,9 @@ export interface ValidatableInvoice {
   invoiceDate: string;
   dueDate: string;
   items: ValidatableInvoiceItem[];
+  /** Rule 46(a)/(e). Optional: most users are below the registration threshold. */
+  companyGstin?: string;
+  billToGstin?: string;
   taxTreatment?: TaxTreatment;
   supplyKind?: SupplyKind;
   supplierStateCode?: string;
@@ -624,8 +896,44 @@ export const validateInvoiceDetailed = (
     return fail("At least one line item is required");
   }
 
+  // GSTINs. ABSENCE IS VALID and must stay valid: registration starts at ₹20
+  // lakh of turnover for services, so most users have no GSTIN, and a validator
+  // that rejected "" would force every one of them to invent one. Present-but-
+  // wrong is a different matter — a mistyped GSTIN on a printed tax invoice
+  // costs the recipient their input tax credit.
+  const companyGstin = normalizeGstin(invoice.companyGstin);
+  const billToGstin = normalizeGstin(invoice.billToGstin);
+  if (companyGstin && !isValidGstin(companyGstin)) {
+    return fail("Your GSTIN is not valid. Check the 15 characters.");
+  }
+  if (billToGstin && !isValidGstin(billToGstin)) {
+    return fail("The client's GSTIN is not valid.");
+  }
+
   const treatment = invoice.taxTreatment;
   const supplyKind = invoice.supplyKind;
+
+  /**
+   * §5.9: the GSTIN's first two characters ARE the state code, so a supplier
+   * state that disagrees with them is a contradiction, not a preference.
+   *
+   * REJECTED, not auto-corrected. Which of the two is wrong is unknowable from
+   * here — the user may have picked the wrong state, or pasted the GSTIN of
+   * their other registration — and the disagreement decides the single most
+   * money-visible branch on the document: supplier state versus place of supply
+   * is what makes the tax CGST+SGST or IGST. Silently rewriting the state would
+   * re-price the invoice without telling anyone; silently rewriting the GSTIN
+   * would print a registration number the user never chose. Either produces a
+   * document the client has to reject and the supplier has to credit-note,
+   * which is far more expensive than one blocked save with a specific message.
+   */
+  if (
+    companyGstin &&
+    !isBlank(invoice.supplierStateCode) &&
+    stateCodeFromGstin(companyGstin) !== (invoice.supplierStateCode ?? "").trim()
+  ) {
+    return fail("Your state must match the first two digits of your GSTIN.");
+  }
 
   // Contradictory geography. `deriveSupplyKind` stays total and silently
   // prefers "export"; the user still has to resolve it before saving.
@@ -650,6 +958,15 @@ export const validateInvoiceDetailed = (
     );
     if (taxedLineWithoutCode) {
       return fail("Add an HSN or SAC code for every taxed line.");
+    }
+    // Rule 46(a) wants the supplier's GSTIN on a tax invoice. A WARNING, not an
+    // error: the treatment is seeded from the business profile, and a user who
+    // has one saved but has not re-opened this draft since must still be able
+    // to save. The next write is where they get nudged (§2.4).
+    if (!companyGstin) {
+      warnings.push(
+        "A tax invoice should carry your GSTIN. Add it in your business profile."
+      );
     }
   }
 

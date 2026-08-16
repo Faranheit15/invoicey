@@ -12,7 +12,12 @@ import {
   isValidHsnSac,
   placeOfSupplyLabelFor,
 } from "@/lib/gst-rates";
-import { GST_STATE_CODES, OTHER_COUNTRY_STATE_CODE } from "@/lib/gstin";
+import {
+  GST_STATE_CODES,
+  OTHER_COUNTRY_STATE_CODE,
+  isValidGstin,
+  normalizeGstin,
+} from "@/lib/gstin";
 
 const toDateInputValue = (value: string) => {
   const trimmed = value.trim();
@@ -58,6 +63,16 @@ const cleanTaxRate = (value: number | undefined): number | undefined => {
   }
   const rounded = Number(value.toFixed(2));
   return isAcceptedGstRate(rounded) ? rounded : undefined;
+};
+
+/**
+ * The same hard GSTIN validation `normalization.ts` runs, repeated here on the
+ * client for the same defence-in-depth reason as the rate and the HSN/SAC: this
+ * is the last thing between a model's output and a printed tax invoice.
+ */
+const cleanClientGstin = (value: string | undefined): string | undefined => {
+  const gstin = normalizeGstin(cleanString(value));
+  return isValidGstin(gstin) ? gstin : undefined;
 };
 
 const cleanStateCode = (value: string | undefined): string | undefined => {
@@ -191,6 +206,12 @@ export const applyInvoiceAssistantPatch = (
       discount,
     };
     appliedFields.push("discount");
+  }
+
+  const billToGstin = cleanClientGstin(patch.billToGstin);
+  if (billToGstin !== undefined) {
+    nextState = { ...nextState, billToGstin };
+    appliedFields.push("billToGstin");
   }
 
   // No `cgst`/`sgst` blocks: the assistant cannot set tax amounts any more.

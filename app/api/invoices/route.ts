@@ -6,10 +6,13 @@ import {
   MAX_ITEM_QUANTITY,
   MAX_ITEM_UNIT_PRICE,
   MAX_MONEY_VALUE,
+  MAX_TDS_RATE_PERCENT,
+  TDS_SECTIONS,
   clampToLimit,
   computeTotals,
   resolveTaxContext,
   validateInvoice,
+  type TdsSection,
 } from "@/lib/invoice-domain";
 import {
   deriveSupplyKind,
@@ -24,7 +27,13 @@ import {
   isValidHsnSac,
   placeOfSupplyLabelFor,
 } from "@/lib/gst-rates";
-import { GST_STATE_CODES, OTHER_COUNTRY_STATE_CODE } from "@/lib/gstin";
+import {
+  GST_STATE_CODES,
+  OTHER_COUNTRY_STATE_CODE,
+  isValidPan,
+  normalizeGstin,
+  panFromGstin,
+} from "@/lib/gstin";
 import { recordActivity, logRouteError } from "@/lib/server/log";
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
@@ -65,6 +74,13 @@ interface RawInvoicePayload {
   convenienceCharge?: number | string;
   paymentInfo?: string;
   status?: InvoiceStatus;
+  companyGstin?: string;
+  billToGstin?: string;
+  companyPan?: string;
+  tdsSection?: string;
+  tdsRatePercent?: number | string;
+  signatureLabel?: string;
+  signatureImageUrl?: string;
   taxTreatment?: string;
   reverseCharge?: boolean;
   supplierStateCode?: string;
@@ -145,6 +161,14 @@ interface NormalizedInvoicePayload extends Partial<NormalizedGstFields> {
   paymentInfo: string;
   status: InvoiceStatus;
   total: number;
+  companyGstin: string;
+  billToGstin: string;
+  companyPan: string;
+  tdsSection: TdsSection;
+  tdsRatePercent: number;
+  tdsAmount: number;
+  signatureLabel: string;
+  signatureImageUrl: string;
 }
 
 const INVOICE_AUTH_MESSAGES = {
@@ -188,6 +212,45 @@ const cleanHsnSac = (value: string | undefined): string => {
 };
 
 const ALLOWED_TAX_TREATMENTS: TaxTreatment[] = ["none", "gst", "composition"];
+
+const ALLOWED_TDS_SECTIONS: TdsSection[] = [
+  "none",
+  ...TDS_SECTIONS.map((spec) => spec.value),
+];
+
+/**
+ * Protocol allowlist for the signature image, mirroring the exporter's
+ * `toSafeImageUrl` and the profile route's `cleanImageUrl`.
+ *
+ * The stored value is interpolated into an `<img src>` in a document rendered
+ * inside a same-origin iframe, so `javascript:` here is not hypothetical.
+ * Storing only safe values makes the exporter's own guard defence in depth
+ * rather than the only line.
+ */
+const cleanImageUrl = (value: string | undefined): string => {
+  const raw = cleanString(value).slice(0, 2048);
+  if (!raw) return "";
+  if (raw.startsWith("/")) return raw;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return "";
+  }
+  if (parsed.protocol === "http:" || parsed.protocol === "https:") return raw;
+  if (parsed.protocol === "data:" && /^data:image\//i.test(raw)) return raw;
+  return "";
+};
+
+/**
+ * NORMALISE ONLY — trim, upper-case, strip internal spaces. Rejecting an
+ * invalid GSTIN is `validateInvoice`'s job, and the two responsibilities stay
+ * separate exactly as they do for every other field in this file: a lowercased
+ * paste is corrected, a wrong one is refused with a message the user can act on
+ * rather than being silently blanked.
+ */
+const cleanGstin = (value: string | undefined): string =>
+  normalizeGstin(value).slice(0, 15);
 
 const normalizeItems = (items: RawInvoiceItem[] = []): NormalizedInvoiceItem[] => {
   return items
@@ -295,6 +358,26 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
   const items = normalizeItems(raw.items || []);
   const gst = normalizeGstFields(raw);
 
+  const companyGstin = cleanGstin(raw.companyGstin);
+  const billToGstin = cleanGstin(raw.billToGstin);
+  // A valid GSTIN carries the PAN in characters 3-12 and is the authority for
+  // it. A hand-typed PAN only survives when there is no GSTIN to contradict it,
+  // and only if it is well-formed — a wrong PAN printed on a document is worse
+  // than none, because the client deducts TDS against it.
+  const typedPan = normalizeGstin(raw.companyPan).slice(0, 10);
+  const companyPan =
+    panFromGstin(companyGstin) || (isValidPan(typedPan) ? typedPan : "");
+
+  const tdsSection: TdsSection = ALLOWED_TDS_SECTIONS.includes(
+    raw.tdsSection as TdsSection
+  )
+    ? (raw.tdsSection as TdsSection)
+    : "none";
+  const tdsRatePercent = clampToLimit(
+    toNumber(raw.tdsRatePercent, 0),
+    MAX_TDS_RATE_PERCENT
+  );
+
   // Single source of truth for the money math — the server never trusts client
   // numbers, and this is the same formula the editor preview and export use.
   // In particular the per-head amounts are DERIVED from the line rates and the
@@ -321,6 +404,10 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
       legacyCgst: clampToLimit(toNumber(raw.cgst, 0), MAX_MONEY_VALUE),
       legacySgst: clampToLimit(toNumber(raw.sgst, 0), MAX_MONEY_VALUE),
     }),
+    // TDS is computed here too, from the same formula the preview runs. It
+    // cannot move `total` — see `buildTotalsRows` — so this only decides what
+    // the informational rows say.
+    tds: { section: tdsSection, ratePercent: tdsRatePercent },
   });
 
   // Store the derived per-line amounts, but only on the derived path: writing
@@ -369,6 +456,17 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
     paymentInfo: cleanString(raw.paymentInfo),
     status,
     total: totals.total,
+    companyGstin,
+    billToGstin,
+    companyPan,
+    tdsSection,
+    // The rate is stored as RESOLVED, not as sent: an unset rate means "use the
+    // section's statutory one", and storing 0 would re-read as "no deduction"
+    // the next time the section's rate changed.
+    tdsRatePercent: totals.tds?.ratePercent ?? 0,
+    tdsAmount: totals.tds?.amount ?? 0,
+    signatureLabel: cleanString(raw.signatureLabel).slice(0, 120),
+    signatureImageUrl: cleanImageUrl(raw.signatureImageUrl),
   };
 };
 

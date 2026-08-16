@@ -10,11 +10,16 @@ import {
 import { AlertBanner } from "@/components/ui/alert-banner";
 import { MicroLabel } from "@/components/ui/micro-label";
 import {
+  buildLineItemCells,
   createInvoiceCsv,
   createInvoiceHtml,
 } from "@/lib/invoice-export";
 import { downloadBlob } from "@/lib/download";
-import { buildTotalsRows, resolveRecordAmounts } from "@/lib/invoice-domain";
+import {
+  buildLineItemColumns,
+  buildTotalsRows,
+  resolveRecordAmounts,
+} from "@/lib/invoice-domain";
 import { eventsApi } from "@/lib/api-client";
 import {
   InvoiceRecord,
@@ -50,7 +55,18 @@ export default function InvoiceModal({
   const titleId = useId();
   const currency = invoice.currency || "INR";
   const status = getInvoiceStatus(invoice);
-  const totalsRows = buildTotalsRows(resolveRecordAmounts(invoice));
+  const amounts = resolveRecordAmounts(invoice);
+  const totalsRows = buildTotalsRows(amounts);
+  // The same column list the export and the editor preview read. Before this,
+  // the modal was the one renderer still hard-coding five columns, so an
+  // invoice with HSN/SAC, UOM, per-line rates or per-line tax showed none of
+  // them on the screen the user checks before sending.
+  const lineTableInput = {
+    items: invoice.items || [],
+    totals: amounts,
+    currency,
+  };
+  const lineColumns = buildLineItemColumns(lineTableInput);
   const showCompanyLogo = Boolean(invoice.companyLogo?.trim()) && !logoLoadFailed;
 
   useEffect(() => {
@@ -123,6 +139,41 @@ export default function InvoiceModal({
     // open for as long as the user wants it to.
     const loadTimeout = setTimeout(fail, 15_000);
 
+    /**
+     * Item 8(4). `load` fires before web fonts settle and before a remote
+     * `companyLogo` (or signature image) has DECODED, so the print dialog could
+     * capture a logo-less, fallback-font page — on a document whose whole job is
+     * to look right in someone else's printer.
+     *
+     * The 3s race is not optional: a logo pointing at a dead host must never
+     * stop the user printing. Failures are swallowed for the same reason — a
+     * broken image is a worse-looking invoice, not a blocked one.
+     */
+    const settleFrameAssets = async (frameWindow: Window): Promise<void> => {
+      try {
+        const doc = frameWindow.document;
+        const assets = Promise.all([
+          doc.fonts?.ready ?? Promise.resolve(),
+          ...Array.from(doc.images).map((img) =>
+            img.complete
+              ? Promise.resolve()
+              : typeof img.decode === "function"
+                ? img.decode().catch(() => {})
+                : new Promise<void>((done) => {
+                    img.addEventListener("load", () => done(), { once: true });
+                    img.addEventListener("error", () => done(), { once: true });
+                  })
+          ),
+        ]);
+        const deadline = new Promise<void>((done) => {
+          setTimeout(done, 3_000);
+        });
+        await Promise.race([assets, deadline]);
+      } catch {
+        // Intentionally silent — see above.
+      }
+    };
+
     frame.onload = () => {
       clearTimeout(loadTimeout);
       const frameWindow = frame.contentWindow;
@@ -144,17 +195,26 @@ export default function InvoiceModal({
         once: true,
       });
 
-      try {
-        frameWindow.focus();
-        frameWindow.print();
-      } catch {
-        fail();
-        return;
-      }
+      // The frame is already tracked and the blob already revoked above, so an
+      // unmount during this await still tears everything down correctly.
+      void settleFrameAssets(frameWindow).then(() => {
+        // The modal may have unmounted (or a second export superseded this
+        // frame) while we waited; printing a detached frame does nothing useful.
+        if (printFrameRef.current !== frame) {
+          return;
+        }
+        try {
+          frameWindow.focus();
+          frameWindow.print();
+        } catch {
+          fail();
+          return;
+        }
 
-      eventsApi.emit({
-        event: "report.generated",
-        meta: { format: "pdf", invoiceId: invoice._id },
+        eventsApi.emit({
+          event: "report.generated",
+          meta: { format: "pdf", invoiceId: invoice._id },
+        });
       });
     };
     frame.onerror = fail;
@@ -332,6 +392,21 @@ export default function InvoiceModal({
                     {invoice.companyPhone}
                   </p>
                 ) : null}
+                {/* Rule 46(a): the supplier's GSTIN, read off the invoice and
+                    never from the live profile — this is the document as it was
+                    issued. Omitted when blank rather than shown empty. */}
+                {invoice.companyGstin ? (
+                  <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                    <span className="text-slate-500 dark:text-slate-400">GSTIN </span>
+                    {invoice.companyGstin}
+                  </p>
+                ) : null}
+                {invoice.companyPan ? (
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    <span className="text-slate-500 dark:text-slate-400">PAN </span>
+                    {invoice.companyPan}
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
                 <MicroLabel as="p" variant="section">
@@ -350,38 +425,63 @@ export default function InvoiceModal({
                     {invoice.billToEmail}
                   </p>
                 ) : null}
+                {/* Rule 46(e): the recipient's GSTIN — what lets them claim the
+                    input tax credit this invoice carries. */}
+                {invoice.billToGstin ? (
+                  <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                    <span className="text-slate-500 dark:text-slate-400">GSTIN </span>
+                    {invoice.billToGstin}
+                  </p>
+                ) : null}
               </div>
             </section>
 
             <section className="px-6 py-5 sm:px-8">
+              {/* Columns and cells both come from the shared builders, so this
+                  table cannot disagree with the printed sheet about which
+                  columns exist, in what order, or what an empty one means. */}
               <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                <div className="grid min-w-[640px] grid-cols-[64px_1.5fr_96px_140px_140px] bg-slate-100 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                  <div>#</div>
-                  <div>Description</div>
-                  <div className="text-right">Qty</div>
-                  <div className="text-right">Unit</div>
-                  <div className="text-right">Amount</div>
-                </div>
-                <div className="min-w-[640px] divide-y divide-slate-100 dark:divide-slate-800">
-                  {invoice.items.map((item, index) => (
-                    <div
-                      className="grid grid-cols-[64px_1.5fr_96px_140px_140px] px-4 py-3 text-sm"
-                      key={`${item.name}-${index}`}
-                    >
-                      <div className="text-slate-500 dark:text-slate-300">{index + 1}</div>
-                      <div className="text-slate-800 dark:text-slate-100">{item.name}</div>
-                      <div className="tabular text-right text-slate-600 dark:text-slate-300">
-                        {item.quantity}
-                      </div>
-                      <div className="tabular text-right font-medium text-slate-700 dark:text-slate-200">
-                        {formatCurrency(item.price, currency)}
-                      </div>
-                      <div className="tabular text-right font-semibold text-slate-900 dark:text-slate-100">
-                        {formatCurrency(item.price * item.quantity, currency)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="bg-slate-100 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                      {lineColumns.map((column) => (
+                        <th
+                          key={column.key}
+                          scope="col"
+                          className={`px-4 py-2 ${
+                            column.align === "right" ? "text-right" : "text-left"
+                          } ${column.wrap ? "" : "whitespace-nowrap"}`}
+                        >
+                          {column.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {(invoice.items || []).map((item, index) => (
+                      <tr key={`${item.name}-${index}`}>
+                        {buildLineItemCells(lineColumns, lineTableInput, index).map(
+                          (cell, cellIndex) => (
+                            <td
+                              key={lineColumns[cellIndex].key}
+                              className={`px-4 py-3 ${
+                                lineColumns[cellIndex].align === "right"
+                                  ? "tabular text-right text-slate-700 dark:text-slate-200"
+                                  : "text-slate-800 dark:text-slate-100"
+                              } ${
+                                lineColumns[cellIndex].wrap
+                                  ? ""
+                                  : "whitespace-nowrap"
+                              }`}
+                            >
+                              {cell || "-"}
+                            </td>
+                          )
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </section>
 
@@ -395,7 +495,11 @@ export default function InvoiceModal({
                     className={
                       row.kind === "grand"
                         ? "mt-2 flex justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-900 dark:border-slate-700 dark:text-slate-100"
-                        : "flex justify-between py-1 text-slate-600 dark:text-slate-300"
+                        : row.kind === "info"
+                          ? // Non-arithmetic (TDS): quieter than a real line, so
+                            // it cannot read as a reduction of the total.
+                            "flex justify-between py-1 text-xs text-slate-500 dark:text-slate-400"
+                          : "flex justify-between py-1 text-slate-600 dark:text-slate-300"
                     }
                   >
                     <span>{row.label}</span>

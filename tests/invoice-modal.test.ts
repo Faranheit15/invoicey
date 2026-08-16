@@ -1,6 +1,14 @@
 import { describe, it, expect } from "bun:test";
-import { buildTotalsRows, resolveRecordAmounts } from "@/lib/invoice-domain";
-import { createInvoiceCsv, createInvoiceHtml } from "@/lib/invoice-export";
+import {
+  buildLineItemColumns,
+  buildTotalsRows,
+  resolveRecordAmounts,
+} from "@/lib/invoice-domain";
+import {
+  buildLineItemCells,
+  createInvoiceCsv,
+  createInvoiceHtml,
+} from "@/lib/invoice-export";
 import { formatCurrency } from "@/lib/invoices";
 import type { InvoiceRecord } from "@/lib/invoices";
 
@@ -129,5 +137,65 @@ describe("InvoiceModal print document", () => {
     expect(
       createInvoiceHtml(makeRecord(), { autoPrint: true })
     ).toContain("window.print()");
+  });
+});
+
+describe("InvoiceModal line items", () => {
+  it("renders the same columns as the exported document, in the same order", () => {
+    // The modal used to hard-code five columns, so HSN/SAC, UOM, per-line rate
+    // and per-line tax were invisible on the last screen the user checks before
+    // sending. Both now read `buildLineItemColumns`.
+    const invoice = makeRecord({
+      taxTreatment: "gst",
+      supplyKind: "intra",
+      supplierStateCode: "29",
+      placeOfSupplyStateCode: "29",
+      items: [
+        {
+          name: "Consulting",
+          price: 10_000,
+          quantity: 1,
+          hsnSac: "998314",
+          unit: "HRS",
+          taxRatePercent: 18,
+        },
+      ],
+      subtotal: undefined,
+      total: undefined as unknown as number,
+    });
+    const amounts = resolveRecordAmounts(invoice);
+    const columns = buildLineItemColumns({
+      items: invoice.items,
+      totals: amounts,
+      currency: invoice.currency,
+    });
+    expect(columns.map((column) => column.key)).toEqual([
+      "index",
+      "description",
+      "hsnSac",
+      "unit",
+      "quantity",
+      "unitPrice",
+      "taxRate",
+      "tax",
+      "amount",
+    ]);
+
+    // The same cells the export writes into the printed table.
+    expect(buildLineItemCells(columns, {
+      items: invoice.items,
+      totals: amounts,
+      currency: invoice.currency,
+    }, 0)).toEqual([
+      "1",
+      "Consulting",
+      "998314",
+      "HRS",
+      "1",
+      formatCurrency(10_000, "INR"),
+      "18%",
+      formatCurrency(1_800, "INR"),
+      formatCurrency(10_000, "INR"),
+    ]);
   });
 });

@@ -269,3 +269,61 @@ describe("the AI contract stays identical across the four files", () => {
     expect(INVOICE_ASSISTANT_SYSTEM_PROMPT).toContain("Never invent a GSTIN");
   });
 });
+
+describe("the client's GSTIN is the one identity field the model may set", () => {
+  const CLIENT_GSTIN = "29AAGCB7383J1Z4";
+
+  it("accepts a valid client GSTIN and normalizes the paste", () => {
+    const result = normalizeAssistantResponse({
+      resolution: "ready",
+      patch: { billToGstin: " 29aagcb7383j 1z4 " },
+    });
+    expect(result.patch.billToGstin).toBe(CLIENT_GSTIN);
+  });
+
+  it("DROPS one that fails the checksum rather than passing it through", () => {
+    // A hallucinated GSTIN is worse than none: it costs the recipient their
+    // input tax credit. The check digit is what makes accepting this field safe.
+    const result = normalizeAssistantResponse({
+      resolution: "ready",
+      patch: { billToGstin: "29AAGCB7383J1Z9" },
+    });
+    expect(result.patch.billToGstin).toBeUndefined();
+  });
+
+  it("still ignores the supplier's own GSTIN and any registration status", () => {
+    const result = normalizeAssistantResponse({
+      resolution: "ready",
+      patch: {
+        companyGstin: "27AAPFU0939F1ZV",
+        taxTreatment: "gst",
+        billToGstin: CLIENT_GSTIN,
+      },
+    });
+    expect(result.patch).toEqual({ billToGstin: CLIENT_GSTIN });
+  });
+
+  it("applies the same two rules client-side", () => {
+    const base = createDefaultInvoiceFormState();
+    const applied = applyInvoiceAssistantPatch(base, {
+      billToGstin: "29aagcb7383j1z4",
+    });
+    expect(applied.nextState.billToGstin).toBe(CLIENT_GSTIN);
+    expect(applied.appliedFields).toContain("billToGstin");
+
+    const dropped = applyInvoiceAssistantPatch(base, {
+      billToGstin: "not-a-gstin",
+    });
+    expect(dropped.nextState.billToGstin).toBe("");
+    expect(dropped.appliedFields).not.toContain("billToGstin");
+  });
+
+  it("is advertised in the prompt, with the never-invent rule", () => {
+    expect(INVOICE_ASSISTANT_SYSTEM_PROMPT).toContain('"billToGstin"?: string');
+    expect(INVOICE_ASSISTANT_SYSTEM_PROMPT).toContain(
+      "Only echo a GSTIN the user typed"
+    );
+    // The supplier's own GSTIN stays out of the contract entirely.
+    expect(INVOICE_ASSISTANT_SYSTEM_PROMPT).not.toContain('"companyGstin"');
+  });
+});

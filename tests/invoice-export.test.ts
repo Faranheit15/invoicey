@@ -430,3 +430,171 @@ describe("print CSS hardening (item 8)", () => {
     expect(printable).toContain("window.print()");
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Phase 2 part 2: the invoice's own GSTINs, PAN, TDS and signature            */
+/* -------------------------------------------------------------------------- */
+
+const MAHARASHTRA_GSTIN = "27AAPFU0939F1ZV";
+const KARNATAKA_GSTIN = "29AAGCB7383J1Z4";
+
+describe("createInvoiceHtml — Rule 46(a)/(e) party identities", () => {
+  it("prints BOTH GSTINs and the supplier PAN", () => {
+    const html = createInvoiceHtml(
+      makeRecord({
+        companyGstin: MAHARASHTRA_GSTIN,
+        companyPan: "AAPFU0939F",
+        billToGstin: KARNATAKA_GSTIN,
+      })
+    );
+    expect(html).toContain(MAHARASHTRA_GSTIN);
+    expect(html).toContain(KARNATAKA_GSTIN);
+    expect(html).toContain("AAPFU0939F");
+    // Each sits with its own party, not in one anonymous block.
+    const billFrom = html.indexOf("Bill From");
+    const billTo = html.indexOf("Bill To");
+    expect(html.indexOf(MAHARASHTRA_GSTIN)).toBeGreaterThan(billFrom);
+    expect(html.indexOf(MAHARASHTRA_GSTIN)).toBeLessThan(billTo);
+    expect(html.indexOf(KARNATAKA_GSTIN)).toBeGreaterThan(billTo);
+  });
+
+  it("says nothing at all about GSTIN when the supplier is unregistered", () => {
+    // An unregistered person's document must not be shaped like a tax invoice.
+    // Asserted on the rendered marker, not the bare word: the stylesheet's own
+    // comment mentions GSTIN and would make a naive substring check pass by
+    // accident forever after.
+    const html = createInvoiceHtml(makeRecord());
+    expect(html).not.toContain('class="box-id"');
+    expect(html).not.toContain("<span>GSTIN</span>");
+    expect(html).not.toContain("<span>PAN</span>");
+  });
+
+  it("escapes a hostile string in every new field", () => {
+    const hostile = '<script>alert(1)</script>"&';
+    const html = createInvoiceHtml(
+      makeRecord({
+        companyGstin: hostile,
+        billToGstin: hostile,
+        companyPan: hostile,
+        signatureLabel: hostile,
+      })
+    );
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;&quot;&amp;");
+  });
+});
+
+describe("createInvoiceHtml — signature block (item 7.4)", () => {
+  it("defaults the label to 'For <company>' and keeps the caveat", () => {
+    const html = createInvoiceHtml(makeRecord());
+    expect(html).toContain("For Acme Inc");
+    expect(html).toContain(
+      "This is a computer-generated invoice and does not require a signature."
+    );
+  });
+
+  it("uses a stored signature label instead of the default", () => {
+    const html = createInvoiceHtml(
+      makeRecord({ signatureLabel: "For and on behalf of Acme Inc" })
+    );
+    expect(html).toContain("For and on behalf of Acme Inc");
+  });
+
+  it("renders a signature image only through the protocol allowlist", () => {
+    const ok = createInvoiceHtml(
+      makeRecord({ signatureImageUrl: "https://cdn.example.com/sig.png" })
+    );
+    expect(ok).toContain('src="https://cdn.example.com/sig.png"');
+    expect(ok).toContain('class="signature-image"');
+
+    // eslint-disable-next-line no-script-url
+    const hostile = createInvoiceHtml(
+      makeRecord({ signatureImageUrl: "javascript:alert(1)" })
+    );
+    expect(hostile).not.toContain("javascript:alert(1)");
+    expect(hostile).not.toContain('class="signature-image"');
+  });
+});
+
+describe("createInvoiceHtml / Csv — the TDS block (item 7.3)", () => {
+  const withTds = makeRecord({
+    items: [{ name: "Retainer", price: 10_000, quantity: 1 }],
+    subtotal: undefined,
+    total: undefined as unknown as number,
+    tdsSection: "194J_professional",
+    tdsRatePercent: 10,
+    tdsAmount: 1_000,
+  });
+
+  it("prints the deduction as an info row and a Net Payable, leaving Total alone", () => {
+    const html = createInvoiceHtml(withTds);
+    expect(html).toContain("Less: TDS @10% (194J / s.393 SN 11)");
+    expect(html).toContain("Net Payable");
+    expect(html).toContain('class="info"');
+    expect(resolveRecordAmounts(withTds).total).toBe(10_000);
+  });
+
+  it("carries the same two rows into the CSV, from the same builder", () => {
+    const csv = createInvoiceCsv(withTds);
+    expect(csv).toContain('"Total","10000.00"');
+    // Leading "-" is a spreadsheet formula character, so the CSV guard prefixes
+    // it — the deduction is still legible, and Excel still treats it as text.
+    expect(csv).toContain(`"Less: TDS @10% (194J / s.393 SN 11)","'-1000.00"`);
+    expect(csv).toContain('"Net Payable","9000.00"');
+  });
+});
+
+describe("createInvoiceCsv — the identity rows are neutralized too", () => {
+  it("prefixes a formula-shaped GSTIN cell", () => {
+    const csv = createInvoiceCsv(makeRecord({ billToGstin: "=cmd|'/c calc'" }));
+    expect(csv).toContain("\"'=cmd");
+    expect(csv).not.toContain('"=cmd');
+  });
+
+  it("emits the party identities as header rows", () => {
+    const csv = createInvoiceCsv(
+      makeRecord({
+        companyGstin: MAHARASHTRA_GSTIN,
+        companyPan: "AAPFU0939F",
+        billToGstin: KARNATAKA_GSTIN,
+      })
+    );
+    expect(csv).toContain(`"Supplier GSTIN","${MAHARASHTRA_GSTIN}"`);
+    expect(csv).toContain('"Supplier PAN","AAPFU0939F"');
+    expect(csv).toContain(`"Client GSTIN","${KARNATAKA_GSTIN}"`);
+  });
+});
+
+describe("a legacy invoice is untouched by any of this", () => {
+  it("gains no GSTIN line, no TDS rows and no signature image", () => {
+    const legacy = makeRecord({
+      cgst: undefined,
+      tax: 18,
+      subtotal: undefined,
+      total: undefined as unknown as number,
+    });
+    const html = createInvoiceHtml(legacy);
+    expect(html).not.toContain('class="box-id"');
+    expect(html).not.toContain("<span>GSTIN</span>");
+    expect(html).not.toContain("Net Payable");
+    expect(html).not.toContain('class="signature-image"');
+    // Still the legacy formula and the legacy heading.
+    expect(resolveRecordAmounts(legacy).total).toBe(118);
+    expect(html).toContain("<h1>INVOICE</h1>");
+  });
+});
+
+describe("toSafeImageUrl — the data: allowance is image-only", () => {
+  it("keeps a data:image logo and drops data:text/html", () => {
+    expect(
+      createInvoiceHtml(
+        makeRecord({ companyLogo: "data:image/png;base64,AAAA" })
+      )
+    ).toContain('src="data:image/png;base64,AAAA"');
+    expect(
+      createInvoiceHtml(
+        makeRecord({ companyLogo: "data:text/html,<script>alert(1)</script>" })
+      )
+    ).not.toContain("data:text/html");
+  });
+});

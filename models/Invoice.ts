@@ -4,6 +4,7 @@ import type {
   SupplyKind,
   TaxTreatment,
 } from "@/lib/gst-supply";
+import type { TdsSection } from "@/lib/invoice-domain";
 
 export interface IInvoice extends Document {
   userId: string;
@@ -53,6 +54,23 @@ export interface IInvoice extends Document {
   // schema default on purpose: absence is how a pre-Phase-2 document announces
   // itself to `resolveTaxContext`, and a default would erase that the first time
   // an old document is re-saved.
+  /**
+   * Rule 46(a)/(e): the supplier's and the recipient's GSTIN. On the INVOICE,
+   * not read live from the business profile — an invoice is a historical
+   * record, and changing a registration must not rewrite documents a client
+   * already holds. Both optional: below the registration thresholds a user has
+   * no GSTIN, and that is the majority case.
+   */
+  companyGstin?: string;
+  billToGstin?: string;
+  /** Characters 3-12 of the GSTIN. Every client deducting TDS needs it. */
+  companyPan?: string;
+  tdsSection?: TdsSection;
+  tdsRatePercent?: number;
+  /** Derived and stored, so a rate change cannot restate an issued document. */
+  tdsAmount?: number;
+  signatureLabel?: string;
+  signatureImageUrl?: string;
   taxTreatment?: TaxTreatment;
   documentType?: DocumentType;
   reverseCharge?: boolean;
@@ -145,6 +163,24 @@ const InvoiceSchema: Schema = new Schema({
   // NO default on taxTreatment/documentType/supplyKind: absence means
   // "written before this field existed" and must stay distinguishable from an
   // explicit value, or the legacy read path becomes untestable.
+  // Party identity. `uppercase`/`trim` at the schema level as well as in the
+  // route: these are identifiers with no lowercase letters in their alphabet,
+  // and a write that bypassed the normaliser must not store a variant spelling
+  // of the same GSTIN.
+  companyGstin: { type: String, uppercase: true, trim: true, default: "" },
+  billToGstin: { type: String, uppercase: true, trim: true, default: "" },
+  companyPan: { type: String, uppercase: true, trim: true, default: "" },
+  // TDS. No default on `tdsSection` for the same reason as `taxTreatment`:
+  // absence is how a pre-item-7 document says it never had the field.
+  tdsSection: {
+    type: String,
+    enum: ["none", "194J_professional", "194J_technical", "194C"],
+  },
+  tdsRatePercent: { type: Number },
+  tdsAmount: { type: Number },
+  signatureLabel: { type: String, default: "" },
+  signatureImageUrl: { type: String, default: "" },
+
   taxTreatment: { type: String, enum: ["none", "gst", "composition"] },
   documentType: {
     type: String,

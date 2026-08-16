@@ -9,7 +9,12 @@ import {
   isValidHsnSac,
   placeOfSupplyLabelFor,
 } from "@/lib/gst-rates";
-import { GST_STATE_CODES, OTHER_COUNTRY_STATE_CODE } from "@/lib/gstin";
+import {
+  GST_STATE_CODES,
+  OTHER_COUNTRY_STATE_CODE,
+  isValidGstin,
+  normalizeGstin,
+} from "@/lib/gstin";
 import type {
   InvoiceAssistantPatch,
   InvoiceAssistantResponse,
@@ -127,6 +132,22 @@ const normalizeHsnSac = (value: unknown): string | undefined => {
 const normalizeUnit = (value: unknown): string | undefined => {
   const raw = toTrimmedString(value).toUpperCase().slice(0, MAX_UNIT_LENGTH);
   return raw || undefined;
+};
+
+/**
+ * The client's GSTIN, or nothing.
+ *
+ * DELIBERATELY OUTSIDE the generic `stringFieldKeys` loop: a GSTIN is not free
+ * text, it is a checksummed identifier, and a wrong one is worse than an absent
+ * one — the recipient loses their input tax credit and the supplier has to
+ * issue a credit note plus a fresh invoice. So this hard-validates through
+ * `lib/gstin` (structure AND mod-36 check digit) and DROPS silently on failure
+ * rather than passing a plausible-looking hallucination through to a printed
+ * document. Never write a second checksum: `isValidGstin` is the only one.
+ */
+const normalizeClientGstin = (value: unknown): string | undefined => {
+  const gstin = normalizeGstin(toTrimmedString(value));
+  return isValidGstin(gstin) ? gstin : undefined;
 };
 
 /** A real GST state code, or "96" (outside India). Never a free-text state. */
@@ -250,9 +271,16 @@ const buildPatch = (rawPatch: unknown): InvoiceAssistantPatch => {
     patch.discount = discount;
   }
 
-  // `cgst`, `sgst`, `tax` and `taxTreatment` are READ AND DISCARDED. They are
-  // absent from `InvoiceAssistantPatch` (see the comment there), so a model that
-  // emits them simply has them ignored — no field, no application, no drift.
+  // `cgst`, `sgst`, `tax`, `taxTreatment` and `companyGstin` are READ AND
+  // DISCARDED. They are absent from `InvoiceAssistantPatch` (see the comment
+  // there), so a model that emits them simply has them ignored — no field, no
+  // application, no drift. `billToGstin` is the one identity field accepted,
+  // and only because it validates against its own check digit.
+  const billToGstin = normalizeClientGstin(patchObject.billToGstin);
+  if (billToGstin !== undefined) {
+    patch.billToGstin = billToGstin;
+  }
+
   const placeOfSupplyStateCode = normalizeStateCode(
     patchObject.placeOfSupplyStateCode
   );

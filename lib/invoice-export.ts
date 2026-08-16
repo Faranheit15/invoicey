@@ -6,8 +6,10 @@ import {
 } from "@/lib/invoices";
 import {
   resolveRecordAmounts,
+  buildLineItemColumns,
   buildTotalsRows,
-  type InvoiceTotals,
+  type LineItemColumn,
+  type LineItemTableInput,
 } from "@/lib/invoice-domain";
 import {
   COMPOSITION_BANNER,
@@ -57,11 +59,18 @@ const toSafeImageUrl = (value: string | undefined) => {
 
   try {
     const parsed = new URL(trimmed);
-    const allowedProtocols = ["http:", "https:", "data:"];
-    if (!allowedProtocols.includes(parsed.protocol)) {
-      return "";
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return escapeHtml(trimmed);
     }
-    return escapeHtml(trimmed);
+    // `data:` is narrowed to images, matching what the profile route and the
+    // invoice route will actually store. A bare `data:` allowance let a
+    // `data:text/html,…` through — inert in an `<img src>`, but this template
+    // is rendered in a SAME-ORIGIN iframe, so it should not be one copy-paste
+    // away from being a document source.
+    if (parsed.protocol === "data:" && /^data:image\//i.test(trimmed)) {
+      return escapeHtml(trimmed);
+    }
+    return "";
   } catch {
     return "";
   }
@@ -72,122 +81,19 @@ const toSafeImageUrl = (value: string | undefined) => {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The line-item table's columns, as a data structure both renderers read.
- *
- * WHY THIS LIVES IN THE EXPORT MODULE. It belongs next to `buildTotalsRows` in
- * `lib/invoice-domain.ts` — that is the module whose whole job is "one shape,
- * every renderer", and putting it there would let `components/InvoiceModal.tsx`
- * pick the new columns up as well. This change set is not allowed to edit
- * `lib/invoice-domain.ts`, and the only other file both the editor's preview
- * and the HTML/CSV exporters can share is this one. It is pure, imports no DOM
- * and no React, so living here costs nothing but the odd-looking import in the
- * editor. Move it to `lib/invoice-domain.ts` when that file is next open, and
- * route `InvoiceModal` through it at the same time.
- *
- * The point is drift: item 6 adds four columns to a table that exists twice in
- * JSX and once as a raw HTML string. Without a shared column list the three
- * renderings disagree about which columns exist, in what order, and what an
- * empty one means — exactly what `buildTotalsRows` was introduced to stop
- * happening to the totals.
+ * `buildLineItemColumns` and its types now live in `lib/invoice-domain.ts`,
+ * beside `buildTotalsRows`, on the same anti-drift principle — all three
+ * renderers (editor preview, view modal, HTML/CSV export) read one column list.
+ * Re-exported here so the two halves of the table stay importable from one
+ * place for the exporters.
  */
-export type LineItemColumnKey =
-  | "index"
-  | "description"
-  | "hsnSac"
-  | "unit"
-  | "quantity"
-  | "unitPrice"
-  | "discount"
-  | "taxRate"
-  | "tax"
-  | "amount";
-
-export interface LineItemColumn {
-  key: LineItemColumnKey;
-  label: string;
-  align: "left" | "right";
-  /**
-   * Print hint. Exactly one column wraps (the description); everything else is
-   * `white-space: nowrap` so an eight-column A4 table cannot collapse into
-   * unreadable slivers. Item 8(6).
-   */
-  wrap: boolean;
-}
-
-/** Accepts a DB item (`name`/`price`) or a form item (`description`/`unitPrice`). */
-export interface LineItemSource {
-  name?: string;
-  description?: string;
-  quantity?: number;
-  price?: number;
-  unitPrice?: number;
-  hsnSac?: string;
-  unit?: string;
-}
-
-export interface LineItemTableInput {
-  items: LineItemSource[];
-  totals: InvoiceTotals;
-  currency: string;
-}
-
-const ALL_LINE_ITEM_COLUMNS: LineItemColumn[] = [
-  { key: "index", label: "#", align: "left", wrap: false },
-  { key: "description", label: "Description", align: "left", wrap: true },
-  { key: "hsnSac", label: "HSN/SAC", align: "left", wrap: false },
-  { key: "unit", label: "UOM", align: "left", wrap: false },
-  { key: "quantity", label: "Qty", align: "right", wrap: false },
-  { key: "unitPrice", label: "Unit Price", align: "right", wrap: false },
-  { key: "discount", label: "Discount", align: "right", wrap: false },
-  { key: "taxRate", label: "Rate", align: "right", wrap: false },
-  { key: "tax", label: "Tax", align: "right", wrap: false },
-  { key: "amount", label: "Amount", align: "right", wrap: false },
-];
-
-const hasText = (value: string | undefined): boolean =>
-  typeof value === "string" && value.trim().length > 0;
-
-/**
- * Which columns this invoice actually needs.
- *
- * An optional column appears only when at least one line populates it. A column
- * of empty cells is worse than no column at A4 width (item 8(6)), and an
- * "HSN/SAC" heading over eight blanks reads as a document that forgot to fill
- * itself in rather than one that never needed the field.
- */
-export const buildLineItemColumns = (
-  input: LineItemTableInput
-): LineItemColumn[] => {
-  const lines = input.totals.lines ?? [];
-  const present = new Set<LineItemColumnKey>([
-    "index",
-    "description",
-    "quantity",
-    "unitPrice",
-    "amount",
-  ]);
-
-  if (input.items.some((item) => hasText(item.hsnSac))) {
-    present.add("hsnSac");
-  }
-  if (input.items.some((item) => hasText(item.unit))) {
-    present.add("unit");
-  }
-  if (lines.some((line) => line.lineDiscount > 0)) {
-    present.add("discount");
-  }
-  if (lines.some((line) => line.ratePercent > 0)) {
-    present.add("taxRate");
-  }
-  // The per-line tax column tracks the TOTALS block: if no tax row is printed
-  // (unregistered, composition, reverse charge, zero-rated under LUT) then no
-  // tax was charged, and a per-line tax column of zeros would contradict that.
-  if ((input.totals.taxRows ?? []).length > 0) {
-    present.add("tax");
-  }
-
-  return ALL_LINE_ITEM_COLUMNS.filter((column) => present.has(column.key));
-};
+export {
+  buildLineItemColumns,
+  type LineItemColumn,
+  type LineItemColumnKey,
+  type LineItemSource,
+  type LineItemTableInput,
+} from "@/lib/invoice-domain";
 
 /**
  * One row's cells, as PLAIN TEXT aligned to `columns`.
@@ -305,6 +211,38 @@ const placeOfSupplyText = (invoice: InvoiceRecord): string => {
   return placeOfSupplyLabelFor(invoice.placeOfSupplyStateCode);
 };
 
+/**
+ * The two parties' tax identities, as label/value pairs.
+ *
+ * Rule 46(a) and 46(e) require the supplier's and the recipient's GSTIN on a
+ * tax invoice; without them the document is not one, whatever it is headed.
+ * They are read from the INVOICE, never from the live business profile — an
+ * invoice is a historical record, and a user who changes registration later
+ * must not retroactively alter documents a client already holds.
+ *
+ * The supplier's PAN rides along because every Indian client deducting TDS
+ * needs the payee's PAN; without it they are obliged to deduct at 20%.
+ *
+ * Absent values are omitted rather than printed empty: an unregistered supplier
+ * is the majority case and their document should simply not mention GSTIN.
+ */
+const partyIdentityRows = (invoice: InvoiceRecord): Array<[string, string]> => {
+  const rows: Array<[string, string]> = [];
+  const companyGstin = (invoice.companyGstin ?? "").trim();
+  const companyPan = (invoice.companyPan ?? "").trim();
+  const billToGstin = (invoice.billToGstin ?? "").trim();
+  if (companyGstin) {
+    rows.push(["Supplier GSTIN", companyGstin]);
+  }
+  if (companyPan) {
+    rows.push(["Supplier PAN", companyPan]);
+  }
+  if (billToGstin) {
+    rows.push(["Client GSTIN", billToGstin]);
+  }
+  return rows;
+};
+
 /** GST particulars, as label/value pairs. Empty when the document has none. */
 const gstDetailRows = (invoice: InvoiceRecord): Array<[string, string]> => {
   if (!invoice.taxTreatment) {
@@ -359,7 +297,16 @@ export const createInvoiceHtml = (
     : "";
   const amountInWords = amountInWordsIndian(amounts.total, currency);
   const gstRows = gstDetailRows(invoice);
-  const signatureLabel = `For ${invoice.companyName?.trim() || "us"}`;
+  const companyGstin = (invoice.companyGstin ?? "").trim();
+  const companyPan = (invoice.companyPan ?? "").trim();
+  const billToGstin = (invoice.billToGstin ?? "").trim();
+  // Item 7.4. The label defaults to the conventional "For <company>"; the image
+  // goes through the SAME protocol allowlist as the logo, because it is an
+  // `<img src>` interpolated into a document rendered in a same-origin iframe.
+  const signatureLabel =
+    (invoice.signatureLabel ?? "").trim() ||
+    `For ${invoice.companyName?.trim() || "us"}`;
+  const signatureImageUrl = toSafeImageUrl(invoice.signatureImageUrl);
 
   // One class list per column, shared by the header and every body cell, so a
   // column cannot be right-aligned in the head and left-aligned in the body.
@@ -545,6 +492,25 @@ export const createInvoiceHtml = (
         line-height: 1.45;
       }
 
+      /* Rule 46(a)/(e): each party's GSTIN sits with that party's name and
+         address, which is where a reader (and an auditor) looks for it. */
+      .box-id {
+        margin: 8px 0 0;
+        font-size: 12px;
+        color: #111827;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .box-id span {
+        color: #6b7280;
+        font-weight: 400;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-size: 11px;
+        margin-right: 4px;
+      }
+
       .gst-details {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -663,6 +629,15 @@ export const createInvoiceHtml = (
         font-weight: 700;
       }
 
+      /* An "info" row is displayed inside the ladder but is not part of the
+         arithmetic (TDS is withheld by the client). Styled quieter than a real
+         line so it cannot be read as a reduction of the invoice's value. */
+      .summary .info td {
+        color: #6b7280;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
       .tax-note {
         padding: 0 28px 16px;
         margin: -12px 0 0;
@@ -719,11 +694,24 @@ export const createInvoiceHtml = (
         font-size: 12px;
       }
 
+      .signature-image {
+        display: block;
+        margin: 8px 0 0 auto;
+        max-width: 200px;
+        max-height: 64px;
+        object-fit: contain;
+      }
+
       .signature-rule {
         margin-top: 48px;
         border-top: 1px solid #9ca3af;
         padding-top: 6px;
         color: #6b7280;
+      }
+
+      /* With a signature image there is no need to leave room to sign by hand. */
+      .signature-image + .signature-rule {
+        margin-top: 8px;
       }
 
       .footer {
@@ -807,6 +795,20 @@ export const createInvoiceHtml = (
             ${invoice.companyAddress ? `<br />${toLineBreaks(invoice.companyAddress)}` : ""}
             ${invoice.companyEmail ? `<br />${toSafeValue(invoice.companyEmail)}` : ""}
           </p>
+          ${
+            companyGstin
+              ? `<p class="box-id"><span>GSTIN</span> ${escapeHtml(
+                  companyGstin
+                )}</p>`
+              : ""
+          }
+          ${
+            companyPan
+              ? `<p class="box-id"><span>PAN</span> ${escapeHtml(
+                  companyPan
+                )}</p>`
+              : ""
+          }
         </div>
         <div class="box">
           <h2 class="box-title">Bill To</h2>
@@ -815,6 +817,13 @@ export const createInvoiceHtml = (
             ${invoice.billToAddress ? `<br />${toLineBreaks(invoice.billToAddress)}` : ""}
             ${invoice.billToEmail ? `<br />${toSafeValue(invoice.billToEmail)}` : ""}
           </p>
+          ${
+            billToGstin
+              ? `<p class="box-id"><span>GSTIN</span> ${escapeHtml(
+                  billToGstin
+                )}</p>`
+              : ""
+          }
         </div>
       </section>
 
@@ -848,7 +857,12 @@ export const createInvoiceHtml = (
             ${buildTotalsRows(amounts)
               .map((row) => {
                 const prefix = row.kind === "discount" ? "- " : "";
-                const rowClass = row.kind === "grand" ? ' class="grand"' : "";
+                const rowClass =
+                  row.kind === "grand"
+                    ? ' class="grand"'
+                    : row.kind === "info"
+                      ? ' class="info"'
+                      : "";
                 return `<tr${rowClass}>
               <td>${escapeHtml(row.label)}</td>
               <td class="amount">${prefix}${escapeHtml(
@@ -896,6 +910,11 @@ export const createInvoiceHtml = (
       <section class="signature">
         <div class="signature-block">
           <div>${escapeHtml(signatureLabel)}</div>
+          ${
+            signatureImageUrl
+              ? `<img src="${signatureImageUrl}" alt="Signature" class="signature-image" />`
+              : ""
+          }
           <div class="signature-rule">Authorised Signatory</div>
           <div style="margin-top: 10px">${escapeHtml(
             COMPUTER_GENERATED_NOTE
@@ -966,7 +985,10 @@ export const createInvoiceCsv = (invoice: InvoiceRecord) => {
     ["Invoice Date", formatDateLong(invoice.invoiceDate)],
     ["Due Date", formatDateLong(invoice.dueDate)],
     ["Currency", currency],
-    // Same label/value pairs the HTML prints, from the same builder.
+    // Same label/value pairs the HTML prints, from the same builders. The party
+    // identities are rendered inside the address boxes on the sheet; the CSV
+    // has no address boxes, so they become ordinary header rows here.
+    ...partyIdentityRows(invoice).map(([label, value]) => [label, value]),
     ...gstDetailRows(invoice).map(([label, value]) => [label, value]),
     ...(invoice.taxTreatment === "composition"
       ? [["Declaration", COMPOSITION_BANNER]]

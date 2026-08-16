@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   calculateInvoiceTotals,
   mapInvoiceRecordToFormState,
@@ -414,5 +415,167 @@ describe("lib/gst-rates — the picker never offers a withdrawn slab", () => {
     expect(placeOfSupplyLabelFor("96")).toBe("Outside India");
     expect(placeOfSupplyLabelFor("29")).toBe("Karnataka");
     expect(placeOfSupplyLabelFor("")).toBe("");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Phase 2 part 2: the invoice's own GSTINs, PAN, TDS and signature            */
+/* -------------------------------------------------------------------------- */
+
+const MAHARASHTRA_GSTIN = "27AAPFU0939F1ZV";
+const KARNATAKA_GSTIN = "29AAGCB7383J1Z4";
+
+describe("the identity fields through the three mappers", () => {
+  it("seeds a new invoice from the saved profile, PAN included", () => {
+    const form = createDefaultInvoiceFormState(
+      profileToSeed({
+        companyGstin: MAHARASHTRA_GSTIN,
+        companyPan: "AAPFU0939F",
+        supplierStateCode: "27",
+        taxTreatment: "gst",
+        signatureLabel: "For and on behalf of Acme",
+        signatureImageUrl: "https://cdn.example.com/sig.png",
+      })
+    );
+    expect(form.companyGstin).toBe(MAHARASHTRA_GSTIN);
+    expect(form.companyPan).toBe("AAPFU0939F");
+    expect(form.signatureLabel).toBe("For and on behalf of Acme");
+    expect(form.signatureImageUrl).toBe("https://cdn.example.com/sig.png");
+    // The CLIENT's GSTIN is per invoice and is never seeded.
+    expect(form.billToGstin).toBe("");
+    expect(form.tdsSection).toBe("none");
+  });
+
+  it("derives the PAN from a seeded GSTIN when the profile has none stored", () => {
+    const form = createDefaultInvoiceFormState({
+      companyGstin: KARNATAKA_GSTIN,
+    });
+    expect(form.companyPan).toBe("AAGCB7383J");
+  });
+
+  it("leaves an unregistered user's invoice completely blank", () => {
+    const form = createDefaultInvoiceFormState();
+    expect(form.companyGstin).toBe("");
+    expect(form.companyPan).toBe("");
+    expect(form.billToGstin).toBe("");
+  });
+
+  it("normalizes a pasted GSTIN and re-derives the PAN on the way out", () => {
+    const payload = mapFormStateToPayload({
+      ...createDefaultInvoiceFormState(),
+      companyName: "Acme",
+      billTo: "Client",
+      companyGstin: " 27aapfu0939f 1zv ",
+      billToGstin: "29 aagcb7383j 1z4",
+      // A hand-typed PAN loses to the one inside the GSTIN: a printed PAN that
+      // contradicts the printed GSTIN is worse than no PAN at all.
+      companyPan: "ZZZZZ9999Z",
+    });
+    expect(payload.companyGstin).toBe(MAHARASHTRA_GSTIN);
+    expect(payload.billToGstin).toBe(KARNATAKA_GSTIN);
+    expect(payload.companyPan).toBe("AAPFU0939F");
+  });
+
+  it("keeps a hand-typed PAN when there is no GSTIN to derive from", () => {
+    const payload = mapFormStateToPayload({
+      ...createDefaultInvoiceFormState(),
+      companyName: "Acme",
+      billTo: "Client",
+      companyPan: "aapfu0939f",
+    });
+    expect(payload.companyPan).toBe("AAPFU0939F");
+  });
+
+  it("reads them back off a stored record, unchanged", () => {
+    const form = mapInvoiceRecordToFormState({
+      companyName: "Acme",
+      billTo: "Client",
+      companyGstin: MAHARASHTRA_GSTIN,
+      companyPan: "AAPFU0939F",
+      billToGstin: KARNATAKA_GSTIN,
+      tdsSection: "194C",
+      tdsRatePercent: 2,
+      signatureLabel: "For Acme",
+      signatureImageUrl: "https://cdn.example.com/sig.png",
+    });
+    expect(form.companyGstin).toBe(MAHARASHTRA_GSTIN);
+    expect(form.billToGstin).toBe(KARNATAKA_GSTIN);
+    expect(form.companyPan).toBe("AAPFU0939F");
+    expect(form.tdsSection).toBe("194C");
+    expect(form.tdsRatePercent).toBe(2);
+    expect(form.signatureLabel).toBe("For Acme");
+  });
+
+  it("leaves a legacy record's identity blank rather than inventing one", () => {
+    const form = mapInvoiceRecordToFormState({
+      companyName: "Acme",
+      billTo: "Client",
+      tax: 18,
+    });
+    expect(form.companyGstin).toBe("");
+    expect(form.billToGstin).toBe("");
+    expect(form.companyPan).toBe("");
+    expect(form.tdsSection).toBe("none");
+    expect("taxTreatment" in form).toBe(false);
+  });
+});
+
+describe("calculateInvoiceTotals — the preview's TDS line", () => {
+  it("shows the deduction without moving the total", () => {
+    const form = {
+      ...createDefaultInvoiceFormState(),
+      items: [{ description: "Retainer", quantity: 1, unitPrice: 10_000 }],
+      tdsSection: "194J_professional" as const,
+      tdsRatePercent: 10,
+    };
+    const totals = calculateInvoiceTotals(form);
+    expect(totals.total).toBe(10_000);
+    expect(totals.tds?.amount).toBe(1_000);
+  });
+});
+
+describe("the JSX renderers bind the identity fields", () => {
+  /**
+   * A SOURCE-LEVEL guard, and deliberately so.
+   *
+   * The two JSX renderings (the editor's live preview and the read-only modal)
+   * are the only surfaces in this repo with no DOM test harness — there is no
+   * testing-library and no jsdom, and adding one is a new dependency. The
+   * printed document is covered properly in `tests/invoice-export.test.ts`;
+   * this is the cheapest honest check that the other two renderings did not get
+   * left behind, which is exactly the drift `buildTotalsRows` and
+   * `buildLineItemColumns` exist to prevent.
+   */
+  const read = (path: string) =>
+    readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+  it("prints both GSTINs in the editor's live preview", () => {
+    const source = read("components/InvoiceEditor.tsx");
+    const preview = source.slice(source.indexOf("Live Preview"));
+    expect(preview).toContain("invoice.companyGstin");
+    expect(preview).toContain("invoice.billToGstin");
+    expect(preview).toContain("invoice.companyPan");
+    expect(preview).toContain("invoice.signatureLabel");
+  });
+
+  it("prints both GSTINs in the read-only modal", () => {
+    const source = read("components/InvoiceModal.tsx");
+    expect(source).toContain("invoice.companyGstin");
+    expect(source).toContain("invoice.billToGstin");
+  });
+
+  it("routes the modal's line table through the shared column builder", () => {
+    const source = read("components/InvoiceModal.tsx");
+    expect(source).toContain("buildLineItemColumns");
+    expect(source).toContain("buildLineItemCells");
+  });
+
+  it("awaits fonts and image decode before driving print()", () => {
+    // Item 8(4): `load` fires before a remote logo decodes, so the dialog could
+    // capture a logo-less page. The 3s race must survive too.
+    const source = read("components/InvoiceModal.tsx");
+    expect(source).toContain("settleFrameAssets");
+    expect(source).toContain("img.decode()");
+    expect(source).toContain("Promise.race");
   });
 });
