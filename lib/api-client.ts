@@ -323,6 +323,43 @@ export const adminApi = {
     ),
 };
 
+export interface AccountSummary {
+  email: string;
+  counts: {
+    invoices: number;
+    deletedInvoices: number;
+    feedback: number;
+    activity: number;
+  };
+}
+
+export interface AccountDeleteResult {
+  deleted: {
+    invoices: number;
+    feedback: number;
+    activityAnonymised: number;
+  };
+}
+
+/**
+ * Account-level data-subject actions: take your data, or destroy the account.
+ *
+ * `exportData` goes through `authedFetchBlob` (the same path the admin exports
+ * use) because the response is a file, not JSON to render. `deleteAccount`
+ * sends the typed confirmation for the SERVER to check — the dialog's own check
+ * only guards a button, and the button is not what deletes the account.
+ */
+export const accountApi = {
+  summary: () => authedFetch<AccountSummary>("/api/account"),
+  exportData: (format: "json" | "csv") =>
+    authedFetchBlob(`/api/account/export${buildQuery({ format })}`),
+  deleteAccount: (confirmEmail: string) =>
+    authedFetch<AccountDeleteResult>("/api/account", {
+      method: "DELETE",
+      body: JSON.stringify({ confirmEmail }),
+    }),
+};
+
 export const feedbackApi = {
   submit: (input: FeedbackInput) =>
     authedFetch<{ message: string; feedback: FeedbackRecord }>("/api/feedback", {

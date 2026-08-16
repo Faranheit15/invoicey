@@ -49,7 +49,7 @@ Three claims Invoicey can make truthfully that a general accounting suite or a W
 - **Currency:** INR is the default. Supported set is INR, USD, EUR, GBP, AED — a closed list, not free text.
 - **Tax:** CGST and SGST are first-class, separately entered fields. A legacy single `tax` field still exists in production data and is read as a fallback; it must not be surfaced as a user-facing concept.
 - **`convenienceCharge` is labeled "Service Charge" in every user-facing surface.** Never expose the internal field name.
-- **Nothing is ever hard-deleted.** Deletion is a soft delete. No UI may promise permanent removal, purging, or unrecoverable deletion.
+- **Nothing is ever hard-deleted.** This governs the *invoice* lifecycle: deleting an invoice is a soft delete, and no UI may promise permanent removal, purging, or unrecoverable deletion of one. **Account deletion is the single deliberate exception** — an explicitly irreversible action that destroys the account and every invoice under it, soft-deleted ones included. It is the only surface allowed to promise unrecoverable deletion, and it must promise it plainly. The exception exists because the DPDP Act 2023 gives the user a right of erasure that a soft delete does not satisfy.
 - **Money formula is fixed:** `subtotal − discount + CGST + SGST + Service Charge`, clamped at zero. Totals are computed server-side; client numbers are never trusted.
 - No team, workspace, or multi-user account model exists. One user owns their own invoices.
 - The product does not send email, take payments, or issue reminders.

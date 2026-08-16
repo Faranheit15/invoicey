@@ -177,6 +177,13 @@ export default function Header() {
               Feedback
             </Link>
           ) : null}
+          {/* The only route to /account, which owns data export + account
+              deletion. Without this link the page is unreachable in the UI. */}
+          {user ? (
+            <Link href="/account" className="hover:text-slate-900 dark:hover:text-white">
+              Account
+            </Link>
+          ) : null}
           {user?.role === "admin" ? (
             <Link href="/admin" className="hover:text-slate-900 dark:hover:text-white">
               Admin
@@ -291,6 +298,13 @@ export default function Header() {
                   className="rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   Feedback
+                </Link>
+                <Link
+                  href="/account"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-md px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Account
                 </Link>
                 {user?.role === "admin" ? (
                   <Link

@@ -49,12 +49,45 @@ findings, all fixed before the commit.
 
 ## Phase 1 — Legal to open signups
 
-- [ ] Privacy policy, terms, named grievance contact
-- [ ] Account deletion
-- [ ] Bulk data export
-- [ ] Nightly backup to R2; verify Atlas IP allowlist
-- [ ] Sentry + uptime check on `/api/health`
-- [ ] Real support email on `/contact`
+- [x] Privacy policy, terms, named grievance contact
+- [x] Account deletion
+- [x] Bulk data export
+- [~] Nightly backup to R2 — script + runbook + restore drill written; the
+      GitHub Actions workflow files must be added by the owner, so **no backup
+      is running yet**
+- [!] Atlas IP allowlist — `0.0.0.0/0` is currently the only working config for
+      Vercel's dynamic egress; hardened via least-privilege users instead
+- [x] Sentry + uptime check on `/api/health`
+- [x] Real support email on `/contact`
+
+### Found and fixed during Phase 1 verification
+
+- [x] Erasure did not erase: log rows were stripped of uid and IP only, while AI
+      rows hold the typed prompt and the whole serialised draft — the user's
+      address and phone, the client's name/email/address, and the bank details.
+      All identifying fields are now emptied.
+- [x] The partial-failure message said "nothing has been lost" at the one moment
+      it was false — Firebase is the last step, so by then the invoices are gone
+- [x] Sentry `contexts.trace.data` bypassed every span rule (it does not travel
+      in `event.spans`), leaking full URLs with query strings, hostname and UA on
+      every sampled transaction
+- [x] `verify-backup.ts` index check was self-fulfilling — Mongoose `autoIndex`
+      rebuilt the indexes it was verifying, so a restore that lost the LogEntry
+      TTL would still pass
+- [x] `backup-to-r2.ts` claimed argv hid the DB credential from `ps`; argv is
+      exactly what `ps` shows. Corrected, with the real mitigation named.
+- [x] Privacy policy published two contradictory Gemini paragraphs, and
+      understated both what is logged and what deletion removes
+
+### Owner actions from Phase 1
+
+- [ ] Fill the placeholders in `components/legal.tsx` (entity, grievance officer,
+      support/security email, postal address, effective date) and the region and
+      jurisdiction values on `/privacy` and `/terms`
+- [ ] Have a lawyer review `/privacy` and `/terms` before launch
+- [ ] Add `.github/workflows/` backup + restore-drill files from the runbook
+- [ ] Sentry project + DSN; R2 bucket, tokens and lifecycle; `age` keypair;
+      least-privilege Atlas users; uptime monitor on `/api/health`
 
 ## Phase 2 — Make the document correct
 

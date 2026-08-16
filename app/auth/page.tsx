@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -707,9 +708,26 @@ export default function AuthPage() {
               </TabsContent>
             </Tabs>
 
+            {/* Linked here, not only in the footer: DPDP wants the notice at
+                the point of collection, and Google's brand verification expects
+                the policy to be reachable from the sign-in screen. */}
             <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-              By continuing, you agree to use Invoicey for lawful invoicing and
-              account management purposes.
+              By continuing you agree to the{" "}
+              <Link
+                href="/terms"
+                className="underline underline-offset-2 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                Terms
+              </Link>{" "}
+              and the{" "}
+              <Link
+                href="/privacy"
+                className="underline underline-offset-2 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                Privacy Policy
+              </Link>
+              , which explain what Invoicey stores and what it sends to Google
+              Gemini when you use the AI assistant.
             </p>
           </CardContent>
         </Card>
