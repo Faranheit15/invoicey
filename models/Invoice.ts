@@ -4,7 +4,11 @@ import type {
   SupplyKind,
   TaxTreatment,
 } from "@/lib/gst-supply";
-import type { TdsSection } from "@/lib/invoice-domain";
+import type {
+  InvoiceDocumentKind,
+  OriginalInvoiceRef,
+  TdsSection,
+} from "@/lib/invoice-domain";
 
 export interface IInvoice extends Document {
   userId: string;
@@ -87,6 +91,26 @@ export interface IInvoice extends Document {
   signatureImageUrl?: string;
   taxTreatment?: TaxTreatment;
   documentType?: DocumentType;
+  /**
+   * Phase 4. WHAT this document is, as opposed to what tax shape it has.
+   *
+   * ABSENT MEANS "invoice", and that absence is load-bearing twice over: every
+   * document written before this field existed is an ordinary invoice, and a
+   * NEW invoice is stored with the field absent too — which is what keeps both
+   * in ONE numbering series under the unique index below. Only proformas,
+   * quotations and credit/debit notes ever carry a value.
+   */
+  documentKind?: InvoiceDocumentKind;
+  /**
+   * Rule 53(1A): the serial number and date of the invoice this note corrects,
+   * both mandatory particulars. Written only from an invoice the route has just
+   * re-read under the caller's own uid — never from the request body — so a
+   * note cannot name an invoice that does not exist, belongs to another user,
+   * or has been soft-deleted.
+   */
+  originalInvoice?: OriginalInvoiceRef & { invoiceDate: Date | string };
+  /** Rule 53: why the note was issued. */
+  reasonForIssue?: string;
   reverseCharge?: boolean;
   supplierStateCode?: string;
   placeOfSupplyStateCode?: string;
@@ -205,6 +229,22 @@ const InvoiceSchema: Schema = new Schema({
     type: String,
     enum: ["tax_invoice", "invoice", "bill_of_supply"],
   },
+  // NO default and NO "invoice" member in the enum: an ordinary invoice is
+  // stored with this field ABSENT, which is what puts it in the same index key
+  // space as every document written before Phase 4. Writing "invoice" here
+  // would split one series into two.
+  documentKind: {
+    type: String,
+    enum: ["proforma", "quotation", "credit_note", "debit_note"],
+  },
+  // A nested path rather than a subdocument: no _id, and an absent reference is
+  // an absent object rather than one full of empty strings.
+  originalInvoice: {
+    invoiceId: { type: String },
+    invoiceNumber: { type: String },
+    invoiceDate: { type: Date },
+  },
+  reasonForIssue: { type: String },
   reverseCharge: { type: Boolean, default: false },
   supplierStateCode: { type: String, default: "" },
   placeOfSupplyStateCode: { type: String, default: "" },
@@ -244,20 +284,37 @@ InvoiceSchema.index({ is_deleted: 1, status: 1, currency: 1 }); // status breakd
  * is that a mistyped draft's number cannot be reused; the suggestion endpoint
  * skips past it, and it is visibly parked rather than silently reissued.
  *
- * `documentType` is deliberately NOT in the key. There is one series today, and
- * adding a field whose values are `undefined` on every legacy row would widen
- * the key with a null that carries no meaning. A future proforma/credit-note
- * series is a new index at the point it exists.
+ * `documentKind` IS in the key, as of Phase 4, and `documentType` still is not.
  *
- * ORDER OF DEPLOYMENT MATTERS: every legacy document is missing both fields, so
- * they all index as (null, null) and a unique build fails immediately. Run
- * `bun run migrate:invoice-numbering` first (it backfills and REPORTS duplicates
- * rather than renumbering), resolve what it reports, then build this in the
- * background off-hours.
+ * The two are different questions. `documentType` (TAX INVOICE / INVOICE / BILL
+ * OF SUPPLY) is derived from the supplier's registration and does not open a
+ * new series — an unregistered person's INVOICE and a registered person's TAX
+ * INVOICE are the same running sequence, and putting it in the key would let
+ * one user reuse a number simply by changing their GST status. `documentKind`
+ * is the series itself: Rule 46(b)'s "unique for a financial year" is per
+ * series, and a proforma numbered into the tax-invoice sequence leaves a gap in
+ * a sequence the law requires to be consecutive.
+ *
+ * THE MIGRATION IMPLICATION, and why it is unusually cheap: an ordinary invoice
+ * is stored with `documentKind` ABSENT, which is exactly what every pre-Phase-4
+ * document already has. Both index as null, so the invoice series keeps the
+ * identical key space it had before and NO BACKFILL IS REQUIRED — this is the
+ * whole reason "invoice" is not a storable value. Only the index itself has to
+ * be replaced, and the old one must be DROPPED first: leaving
+ * `uniq_user_fy_invoice_number` in place would keep enforcing uniqueness ACROSS
+ * series, so a user whose proformas and invoices share a numbering pattern
+ * would be refused a legitimate proforma number. `bun run
+ * migrate:invoice-numbering` does the drop-then-build in the right order.
+ *
+ * ORDER OF DEPLOYMENT MATTERS: every legacy document is missing both numbering
+ * fields, so they all index as (null, null) and a unique build fails
+ * immediately. Run `bun run migrate:invoice-numbering` first (it backfills and
+ * REPORTS duplicates rather than renumbering), resolve what it reports, then
+ * build this in the background off-hours.
  */
 InvoiceSchema.index(
-  { userId: 1, financialYear: 1, invoiceNumberKey: 1 },
-  { unique: true, name: "uniq_user_fy_invoice_number" }
+  { userId: 1, financialYear: 1, documentKind: 1, invoiceNumberKey: 1 },
+  { unique: true, name: "uniq_user_fy_kind_invoice_number" }
 );
 
 export default mongoose.models.Invoice ||

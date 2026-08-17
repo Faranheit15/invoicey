@@ -59,6 +59,14 @@ const matches = (
       ) {
         return false;
       }
+    } else if (value === null) {
+      // Mongo's `{ field: null }` matches a document whose field is null OR
+      // missing. The numbering series relies on exactly that: an ordinary
+      // invoice stores no `documentKind`, so `documentKind: null` is how the
+      // suggester scans the invoice series (and every pre-Phase-4 document).
+      if (doc[key] !== null && doc[key] !== undefined) {
+        return false;
+      }
     } else if (doc[key] !== value) {
       return false;
     }
@@ -69,10 +77,14 @@ const matches = (
 /**
  * The unique index from `models/Invoice.ts`, simulated.
  *
- * `{ userId, financialYear, invoiceNumberKey }`, FULL — soft-deleted rows are
- * checked too, exactly as the real index does, because a soft-deleted document
- * still holds its number. Without this the fake store would accept duplicates
- * and the 409 path would be untestable.
+ * `{ userId, financialYear, documentKind, invoiceNumberKey }`, FULL —
+ * soft-deleted rows are checked too, exactly as the real index does, because a
+ * soft-deleted document still holds its number. Without this the fake store
+ * would accept duplicates and the 409 path would be untestable.
+ *
+ * `documentKind` is compared with `??`-normalised undefined, matching the real
+ * index: an ordinary invoice stores nothing there, so an invoice and a proforma
+ * with the same number are two different keys and both may exist.
  */
 const duplicateKeyError = () =>
   Object.assign(new Error("E11000 duplicate key error"), { code: 11000 });
@@ -92,6 +104,7 @@ class FakeInvoice {
           doc._id !== this._id &&
           doc.userId === this.userId &&
           doc.financialYear === this.financialYear &&
+          (doc.documentKind ?? null) === (this.documentKind ?? null) &&
           doc.invoiceNumberKey === this.invoiceNumberKey
         ) {
           throw duplicateKeyError();

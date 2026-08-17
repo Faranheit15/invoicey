@@ -49,12 +49,18 @@ import {
   TDS_SECTIONS,
   buildLineItemColumns,
   buildTotalsRows,
+  creditNoteDeclarationDeadline,
+  documentKindSpecFor,
+  documentTaxNoticeFor,
+  documentTitleFor,
+  isCreditOrDebitNote,
+  resolveDocumentKind,
   tdsSpecFor,
+  type InvoiceDocumentKind,
   type TdsSection,
 } from "@/lib/invoice-domain";
 import {
   COMPOSITION_BANNER,
-  DOCUMENT_TITLES,
   TAX_SUPPRESSION_NOTES,
   deriveSupplyKind,
   documentTypeFor,
@@ -92,6 +98,7 @@ import {
   InvoiceFormItem,
   InvoiceFormState,
   InvoiceStatus,
+  applyDocumentKindToDraft,
   calculateInvoiceTotals,
   checkSupplierStateAgainstGstin,
   createDefaultInvoiceFormState,
@@ -260,11 +267,12 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     setIsDirty(true);
   }, []);
   /**
-   * True from the instant a `?duplicate=` link is recognised until the copy has
-   * either landed or failed. The profile seed reads it AFTER its own await, so
-   * a slow profile fetch cannot land on top of a duplicated draft.
+   * True from the instant a `?duplicate=`, `?convert=`, `?credit_note=` or
+   * `?debit_note=` link is recognised until that copy has either landed or
+   * failed. The profile seed reads it AFTER its own await, so a slow profile
+   * fetch cannot land on top of a draft seeded from another document.
    */
-  const isDuplicatePendingRef = useRef(false);
+  const isSourceSeedPendingRef = useRef(false);
   const authRedirectPath = useMemo(() => {
     if (mode === "edit" && invoiceId) {
       return `/auth?next=${encodeURIComponent(`/create-invoice/${invoiceId}`)}`;
@@ -288,6 +296,8 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       userId,
       mode,
       invoiceId,
+      // A half-written proforma must not land in the invoice draft's slot.
+      documentKind: invoice.documentKind,
       state: invoice,
       isDirty,
       enabled: !isLoadingInvoice && !isSaving,
@@ -380,6 +390,46 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const documentType = invoice.taxTreatment
     ? documentTypeFor(invoice.taxTreatment)
     : "invoice";
+  /**
+   * WHAT is being edited. Held in form state (never read from the URL during
+   * render, which would differ between the server and the first client paint),
+   * so the heading, the field labels and the printed title all follow one
+   * value.
+   */
+  const documentKind = resolveDocumentKind(invoice.documentKind);
+  const documentSpec = documentKindSpecFor(documentKind);
+  const isNote = isCreditOrDebitNote(documentKind);
+  const documentTitle = documentTitleFor({
+    documentKind,
+    documentType,
+    taxTreatment: invoice.taxTreatment,
+  });
+  // "This is not a tax invoice." — the sentence a proforma is illegal without.
+  const documentNotice = documentTaxNoticeFor({
+    documentKind,
+    documentType,
+    taxTreatment: invoice.taxTreatment,
+  });
+  /**
+   * §34(2)'s deadline, shown while the note is being written rather than only
+   * as a save-time warning: it is the one fact that decides whether this
+   * document will actually reduce the user's liability, and by save time they
+   * have already committed to the numbers.
+   */
+  const creditNoteDeadline =
+    documentKind === "credit_note" && invoice.taxTreatment === "gst"
+      ? creditNoteDeclarationDeadline(invoice.originalInvoice?.invoiceDate)
+      : null;
+  /**
+   * An ISSUED invoice being edited. §34 is what a supplier is supposed to use
+   * to correct one: the client already holds the original, and rewriting it
+   * leaves the two copies disagreeing — which is the audit hazard, not the
+   * typo. The edit path is NOT removed (that is a product decision, and a
+   * mis-numbered draft still has to be fixable); the lawful route is offered
+   * beside it.
+   */
+  const isIssuedInvoiceEdit =
+    mode === "edit" && documentKind === "invoice" && invoice.status !== "draft";
   // `taxTreatment` goes in because the endorsement is a statement made under a
   // GST registration: an unregistered exporter's document carries none. The
   // preview must agree with the printed document, and both read this function.
@@ -463,7 +513,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     }
     // Set SYNCHRONOUSLY, before the first await: both effects mount in the same
     // commit, and this is what the profile seed checks once its fetch resolves.
-    isDuplicatePendingRef.current = true;
+    isSourceSeedPendingRef.current = true;
 
     let cancelled = false;
 
@@ -478,8 +528,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
         // in the sense the law cares about.
         let invoiceNumber = "";
         try {
+          // Out of the SOURCE's own series: duplicating a proforma must not
+          // consume an invoice number, and vice versa.
           const suggestion = await invoicesApi.suggestNumber(
-            today.toISOString().split("T")[0]
+            today.toISOString().split("T")[0],
+            resolveDocumentKind(source.documentKind)
           );
           invoiceNumber = suggestion.invoiceNumber ?? "";
         } catch {
@@ -508,13 +561,142 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
         );
       } catch (err) {
         // The duplicate did not happen, so let the profile seed run instead.
-        isDuplicatePendingRef.current = false;
+        isSourceSeedPendingRef.current = false;
         if (cancelled || err instanceof UnauthenticatedError) {
           return;
         }
         const { message } = describeRequestError(
           err,
           "Couldn't copy that invoice. Start from a blank one instead."
+        );
+        setError(message);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [markDirty, mode]);
+
+  /**
+   * DERIVED DOCUMENTS: `?convert=<id>`, `?credit_note=<id>`, `?debit_note=<id>`.
+   *
+   * All three seed a NEW draft from an existing document and differ only in
+   * what comes out:
+   *
+   *   - `convert` turns an accepted PROFORMA into an invoice. It takes a fresh
+   *     number OUT OF THE INVOICE SERIES and today's dates — carrying the
+   *     proforma's number across would put a "PI/…" serial on a tax invoice and
+   *     leave a hole in the invoice sequence. This is the entire point of
+   *     issuing a proforma, so it is a first-class flow rather than a duplicate
+   *     with a dropdown.
+   *   - `credit_note` / `debit_note` open §34's lawful correction path on an
+   *     issued invoice, pre-filled from it and carrying the Rule 53(1A)
+   *     reference. The user edits the lines down to what is actually being
+   *     credited, and still has to save.
+   *
+   * Nothing is written here, for the same reasons as the duplicate flow: a
+   * saved document is a legal object, and a number burnt on an abandoned draft
+   * is a gap in a series the law requires to be consecutive.
+   */
+  useEffect(() => {
+    if (mode !== "create") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const convertId = params.get("convert");
+    const creditNoteId = params.get("credit_note");
+    const debitNoteId = params.get("debit_note");
+    const sourceId = convertId || creditNoteId || debitNoteId;
+    if (!sourceId) {
+      return;
+    }
+    const targetKind: InvoiceDocumentKind = convertId
+      ? "invoice"
+      : creditNoteId
+        ? "credit_note"
+        : "debit_note";
+
+    // Set before the first await, like the duplicate flow: both effects mount
+    // in the same commit and the profile seed checks this once its own fetch
+    // resolves.
+    isSourceSeedPendingRef.current = true;
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const source = await invoicesApi.get(sourceId);
+        const sourceKind = resolveDocumentKind(source.documentKind);
+        const sourceSpec = documentKindSpecFor(sourceKind);
+
+        // The pairing is refused here as well as on the server, so the user is
+        // told what is wrong instead of filling in a form that 400s on save.
+        if (targetKind === "invoice" && sourceKind === "invoice") {
+          throw new Error("not-convertible");
+        }
+        if (targetKind !== "invoice" && sourceKind !== "invoice") {
+          throw new Error("not-creditable");
+        }
+
+        const today = new Date();
+        let invoiceNumber = "";
+        try {
+          const suggestion = await invoicesApi.suggestNumber(
+            today.toISOString().split("T")[0],
+            targetKind
+          );
+          invoiceNumber = suggestion.invoiceNumber ?? "";
+        } catch {
+          invoiceNumber = "";
+        }
+
+        if (cancelled || !isPristineRef.current) {
+          return;
+        }
+
+        // `buildDuplicateFormState` does the number, the dates and the status;
+        // `applyDocumentKindToDraft` does the kind and the Rule 53 reference.
+        setInvoice(
+          applyDocumentKindToDraft(
+            buildDuplicateFormState(mapInvoiceRecordToFormState(source), {
+              invoiceNumber,
+              today,
+            }),
+            { documentKind: targetKind, source }
+          )
+        );
+        markDirty();
+        const targetNoun = documentKindSpecFor(targetKind).noun.toLowerCase();
+        setDuplicateNotice(
+          targetKind === "invoice"
+            ? `Converted from ${sourceSpec.noun.toLowerCase()} ${
+                source.invoiceNumber || "—"
+              }. New invoice number and today's dates — check them, then save.`
+            : `New ${targetNoun} against invoice ${
+                source.invoiceNumber || "—"
+              }. Edit the lines down to what is actually being ${
+                targetKind === "credit_note" ? "credited" : "charged"
+              }, then save.`
+        );
+      } catch (err) {
+        isSourceSeedPendingRef.current = false;
+        if (cancelled || err instanceof UnauthenticatedError) {
+          return;
+        }
+        if ((err as Error)?.message === "not-convertible") {
+          setError(
+            "Only a proforma or a quotation can be converted into an invoice."
+          );
+          return;
+        }
+        if ((err as Error)?.message === "not-creditable") {
+          setError("A credit or debit note can only be raised against an invoice.");
+          return;
+        }
+        const { message } = describeRequestError(
+          err,
+          "Couldn't open that document. Start from a blank one instead."
         );
         setError(message);
       }
@@ -567,12 +749,25 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
    */
   useEffect(() => {
     let cancelled = false;
+    // Read SYNCHRONOUSLY, inside the effect: reading it during render would
+    // make the server's HTML ("Create Invoice") disagree with the browser's
+    // first paint ("Create Proforma invoice"). The kind reaches the render
+    // through form state, one commit later.
+    const seedKind: InvoiceDocumentKind =
+      mode === "create"
+        ? resolveDocumentKind(
+            new URLSearchParams(window.location.search).get("kind")
+          )
+        : "invoice";
 
     void (async () => {
       const [profileOutcome, numberOutcome] = await Promise.allSettled([
         profileApi.get(),
         mode === "create"
-          ? invoicesApi.suggestNumber(new Date().toISOString().split("T")[0])
+          ? invoicesApi.suggestNumber(
+              new Date().toISOString().split("T")[0],
+              seedKind
+            )
           : Promise.resolve(null),
       ]);
       if (cancelled) {
@@ -591,7 +786,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
         // A `?duplicate=` copy is in flight (or has landed): seeding here
         // would blank the client and line items it just carried over, and it
         // has already asked for a number of its own.
-        !isDuplicatePendingRef.current
+        !isSourceSeedPendingRef.current
       ) {
         const suggested =
           numberOutcome.status === "fulfilled" && numberOutcome.value
@@ -601,6 +796,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
           createDefaultInvoiceFormState({
             ...profileToSeed(saved),
             invoiceNumber: suggested,
+            documentKind: seedKind,
           })
         );
       }
@@ -799,6 +995,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
       withPaymentOfTax: invoice.withPaymentOfTax,
       lutArn: invoice.lutArn,
       countryOfDestination: invoice.countryOfDestination,
+      // Rule 53(1A) is checked here as well as in the API, on the same shared
+      // validator — a note whose reference went missing must be caught before
+      // the user watches a save fail.
+      documentKind: invoice.documentKind,
+      originalInvoice: invoice.originalInvoice,
       totals: { cgst: totals.cgst, sgst: totals.sgst, igst: totals.igst },
     });
 
@@ -830,7 +1031,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
     const runSave = async () => {
       try {
         setIsSaving(true);
-        setSaveStatus(mode === "edit" ? "Saving changes…" : "Creating invoice…");
+        setSaveStatus(
+          mode === "edit"
+            ? "Saving changes…"
+            : `Creating ${documentSpec.noun.toLowerCase()}…`
+        );
 
         const payload = mapFormStateToPayload({
           ...invoice,
@@ -1071,14 +1276,23 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               Back to dashboard
             </Button>
             <h1 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-slate-100">
-              {mode === "edit" ? "Edit Invoice" : "Create Invoice"}
+              {mode === "edit" ? "Edit" : "Create"} {documentSpec.noun.toLowerCase()}
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Build polished invoices with complete business and payment details.
+              {documentKind === "invoice"
+                ? "Build polished invoices with complete business and payment details."
+                : documentKind === "credit_note"
+                  ? "The lawful way to reduce an invoice you have already issued (§34 CGST)."
+                  : documentKind === "debit_note"
+                    ? "Charge more against an invoice you have already issued (§34 CGST)."
+                    : "A pre-supply quote of what the invoice will say. It is not a tax invoice."}
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-            {mode === "create" ? (
+            {/* Not on a note: it is pre-filled from the invoice it corrects, and
+                a drafting assistant that rewrote those lines from a sentence
+                would be editing a legal reference the user never typed. */}
+            {mode === "create" && !isNote ? (
               <Button
                 type="button"
                 variant="outline"
@@ -1112,14 +1326,15 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
               ) : (
                 <>
                   <CheckIcon className="w-4 h-4" />
-                  {mode === "edit" ? "Update Invoice" : "Create Invoice"}
+                  {mode === "edit" ? "Update" : "Create"}{" "}
+                  {documentSpec.noun.toLowerCase()}
                 </>
               )}
             </Button>
           </div>
         </div>
 
-        {mode === "create" && isAiPanelVisible ? (
+        {mode === "create" && !isNote && isAiPanelVisible ? (
           <div className="mb-6">
             <InvoiceAiAssistant
               invoice={invoice}
@@ -1138,6 +1353,65 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
         {error ? (
           <AlertBanner className="mb-4" onRetry={errorRetry ?? undefined}>
             {error}
+          </AlertBanner>
+        ) : null}
+
+        {/*
+          THE LAWFUL ROUTE, offered beside the edit rather than instead of it.
+
+          Once an invoice has left as anything other than a draft, the client
+          holds a copy. §34 says the way to change what was charged is a credit
+          note (down) or a debit note (up) — a fresh document that references
+          this one — precisely so both parties' copies still agree afterwards.
+          Editing in place leaves them disagreeing, which is the audit hazard.
+
+          Not a block: this is a product decision, not a validation rule, and a
+          mistyped address or a wrong client email is still worth fixing in
+          place. The banner names the alternative and gets out of the way.
+        */}
+        {isIssuedInvoiceEdit ? (
+          <AlertBanner tone="info" className="mb-4">
+            <span className="min-w-0 flex-1">
+              This invoice has already been issued, so your client holds a copy.
+              Under GST the way to change what was charged is a credit note (to
+              reduce it) or a debit note (to add to it) — not an edit.
+            </span>
+            <span className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  confirmLeave(
+                    () =>
+                      router.push(
+                        `/create-invoice?credit_note=${encodeURIComponent(
+                          invoiceId ?? ""
+                        )}`
+                      ),
+                    "/create-invoice"
+                  )
+                }
+              >
+                Create credit note
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  confirmLeave(
+                    () =>
+                      router.push(
+                        `/create-invoice?debit_note=${encodeURIComponent(
+                          invoiceId ?? ""
+                        )}`
+                      ),
+                    "/create-invoice"
+                  )
+                }
+              >
+                Create debit note
+              </Button>
+            </span>
           </AlertBanner>
         ) : null}
 
@@ -1428,16 +1702,41 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
 
               <section className="space-y-3">
                 <MicroLabel as="h2" variant="section">
-                  Invoice Details
+                  {documentSpec.noun} details
                 </MicroLabel>
+                {/* Rule 53(1A): the invoice a note corrects, and why. READ-ONLY
+                    — the reference is set by the flow that opened this note and
+                    re-proved server-side against an invoice owned by this user,
+                    so a typed number here could only ever disagree with it. */}
+                {isNote && invoice.originalInvoice ? (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-800/60">
+                    <p className="font-medium text-slate-800 dark:text-slate-100">
+                      Against invoice {invoice.originalInvoice.invoiceNumber}
+                      {invoice.originalInvoice.invoiceDate
+                        ? ` dated ${formatDateLong(
+                            invoice.originalInvoice.invoiceDate
+                          )}`
+                        : ""}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                      Rule 53 requires the original invoice&rsquo;s number and
+                      date on this document. Both are printed on it.
+                      {creditNoteDeadline
+                        ? ` Declare it in a return by ${creditNoteDeadline} to reduce your GST liability.`
+                        : ""}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <Field label="Invoice number">
+                  <Field label={documentSpec.numberLabel}>
                     {(field) => (
                       <Input
                         {...field}
                         data-invoice-field="invoiceNumber"
                         maxLength={INVOICE_NUMBER_MAX}
-                        placeholder="INV/2026-27/001"
+                        placeholder={documentSpec.numberPattern
+                          .replace("{FY}", "2026-27")
+                          .replace("{SEQ:3}", "001")}
                         value={invoice.invoiceNumber}
                         onChange={(event) =>
                           updateField("invoiceNumber", event.target.value)
@@ -1445,7 +1744,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       />
                     )}
                   </Field>
-                  <Field label="Invoice date">
+                  <Field label={documentSpec.dateLabel}>
                     {(field, labelId) => (
                       <DatePickerField
                         {...field}
@@ -1457,7 +1756,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       />
                     )}
                   </Field>
-                  <Field label="Due date" hint={dueDateHint}>
+                  <Field label={documentSpec.dueDateLabel} hint={dueDateHint}>
                     {(field, labelId) => (
                       <DatePickerField
                         {...field}
@@ -1514,6 +1813,29 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                       />
                     )}
                   </Field>
+                  {/* Rule 53 wants the nature of the document; in practice the
+                      reason is what makes the note legible to the client and to
+                      an auditor a year later. Optional — a note with no stated
+                      reason is still a valid note. */}
+                  {isNote ? (
+                    <Field label="Reason" optional>
+                      {(field) => (
+                        <Input
+                          {...field}
+                          maxLength={200}
+                          placeholder={
+                            documentKind === "credit_note"
+                              ? "Sales return / post-supply discount"
+                              : "Price revision / undercharge"
+                          }
+                          value={invoice.reasonForIssue}
+                          onChange={(event) =>
+                            updateField("reasonForIssue", event.target.value)
+                          }
+                        />
+                      )}
+                    </Field>
+                  ) : null}
                 </div>
               </section>
 
@@ -1806,7 +2128,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   ) : (
                     <div className="space-y-1">
                       <p className="font-medium text-slate-800 dark:text-slate-100">
-                        {DOCUMENT_TITLES[documentType]}
+                        {documentTitle}
                         {invoice.companyGstin || profile?.companyGstin
                           ? ` · GSTIN ${
                               invoice.companyGstin || profile?.companyGstin
@@ -2148,7 +2470,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                 <div className="flex items-center justify-between">
                   <div>
                     <MicroLabel variant="onDark">
-                      {DOCUMENT_TITLES[documentType]}
+                      {documentTitle}
                     </MicroLabel>
                     <p className="mt-1 text-xl font-semibold tracking-tight">
                       {invoice.invoiceNumber || "INV-XXXXXX"}
@@ -2174,6 +2496,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                   lib/gst-supply.ts. Do not reflow, re-case or "improve" it —
                   and never rebuild it from parts here, or the preview and the
                   exported document stop being the same sentence. */}
+              {/* "This is not a tax invoice." — from the same resolver the
+                  printed sheet uses, so the two cannot word it differently. */}
+              {documentNotice ? (
+                <p className="border-b border-slate-200 bg-slate-100 px-5 py-2 text-xs font-semibold leading-relaxed text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  {documentNotice}
+                </p>
+              ) : null}
               {invoice.taxTreatment === "composition" ? (
                 <p className="border-b border-slate-200 bg-slate-100 px-5 py-2 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                   {COMPOSITION_BANNER}
@@ -2241,7 +2570,9 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
 
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-                    <p className="text-slate-500 dark:text-slate-300">Invoice Date</p>
+                    <p className="text-slate-500 dark:text-slate-300">
+                      {documentSpec.printedDateLabel}
+                    </p>
                     <p className="font-medium text-slate-800 dark:text-slate-100">
                       {invoice.invoiceDate
                         ? formatDateLong(invoice.invoiceDate)
@@ -2249,12 +2580,39 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                     </p>
                   </div>
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
-                    <p className="text-slate-500 dark:text-slate-300">Due Date</p>
+                    <p className="text-slate-500 dark:text-slate-300">
+                      {documentSpec.printedDueDateLabel}
+                    </p>
                     <p className="font-medium text-slate-800 dark:text-slate-100">
                       {invoice.dueDate ? formatDateLong(invoice.dueDate) : "Select date"}
                     </p>
                   </div>
                 </div>
+
+                {/* Rule 53(1A) particulars, in the preview because they are on
+                    the printed sheet — the two renderings must agree. */}
+                {isNote && invoice.originalInvoice?.invoiceNumber ? (
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+                      <p className="text-slate-500 dark:text-slate-300">
+                        Original Invoice Number
+                      </p>
+                      <p className="font-medium text-slate-800 dark:text-slate-100">
+                        {invoice.originalInvoice.invoiceNumber}
+                      </p>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800">
+                      <p className="text-slate-500 dark:text-slate-300">
+                        Original Invoice Date
+                      </p>
+                      <p className="font-medium text-slate-800 dark:text-slate-100">
+                        {invoice.originalInvoice.invoiceDate
+                          ? formatDateLong(invoice.originalInvoice.invoiceDate)
+                          : "—"}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
 
                 {/* Rule 46(o) asks for the reverse-charge INDICATOR, not the
                     flag: it is printed even when the answer is "No". */}
@@ -2455,7 +2813,8 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             ) : (
               <>
                 <CheckIcon className="w-4 h-4" />
-                {mode === "edit" ? "Update Invoice" : "Create Invoice"}
+                {mode === "edit" ? "Update" : "Create"}{" "}
+                {documentSpec.noun.toLowerCase()}
               </>
             )}
           </Button>

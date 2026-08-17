@@ -25,6 +25,9 @@
  */
 
 import {
+  NOTE_BEFORE_ORIGINAL_ERROR,
+  NOTE_ORIGINAL_DATE_ERROR,
+  NOTE_WITHOUT_ORIGINAL_ERROR,
   UNKNOWN_GST_RATE_ERROR,
   validateInvoiceDetailed,
   type ValidatableInvoice,
@@ -180,6 +183,41 @@ const ISSUE_SPECS: readonly IssueSpec[] = [
     error: "Due date is invalid",
     field: () => "dueDate",
     repair: (invoice) => ({ ...invoice, dueDate: "2000-01-01" }),
+  },
+  {
+    /**
+     * Rule 53(1A). NO CONTROL to focus, deliberately: the reference is set by
+     * the flow that opened the note and re-proved server-side, so it is not a
+     * field the user can retype. Reported as a banner, which is the honest
+     * shape of "start this note again from the invoice it belongs to".
+     */
+    error: NOTE_WITHOUT_ORIGINAL_ERROR,
+    field: () => null,
+    repair: (invoice) => ({
+      ...invoice,
+      originalInvoice: {
+        ...invoice.originalInvoice,
+        invoiceNumber: "INV-1",
+        invoiceDate: invoice.originalInvoice?.invoiceDate || "2000-01-01",
+      },
+    }),
+  },
+  {
+    error: NOTE_ORIGINAL_DATE_ERROR,
+    field: () => null,
+    repair: (invoice) => ({
+      ...invoice,
+      originalInvoice: { ...invoice.originalInvoice, invoiceDate: "2000-01-01" },
+    }),
+  },
+  {
+    // This one IS the user's to fix: the note's own date is an editable field.
+    error: NOTE_BEFORE_ORIGINAL_ERROR,
+    field: () => "invoiceDate",
+    repair: (invoice) => ({
+      ...invoice,
+      invoiceDate: invoice.originalInvoice?.invoiceDate ?? invoice.invoiceDate,
+    }),
   },
   {
     error: "At least one line item is required",

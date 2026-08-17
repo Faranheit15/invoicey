@@ -234,9 +234,11 @@ export const invoicesApi = {
    * in. Read-only — nothing is written and no counter moves, so calling it for
    * a draft the user then abandons leaves no gap in the series.
    */
-  suggestNumber: (date?: string) =>
+  suggestNumber: (date?: string, kind?: string) =>
     authedFetch<InvoiceNumberSuggestion>(
-      `/api/invoices${buildQuery({ suggest_number: 1, date })}`
+      // `kind` picks the SERIES. Omitted means the invoice series, which is
+      // what every pre-Phase-4 call site asks for without saying so.
+      `/api/invoices${buildQuery({ suggest_number: 1, date, kind })}`
     ),
 };
 

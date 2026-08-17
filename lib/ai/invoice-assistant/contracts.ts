@@ -8,6 +8,23 @@ export interface AssistantConversationEntry {
 }
 
 /**
+ * Where the turn's text came from, and the ONLY thing extraction adds to this
+ * contract.
+ *
+ * - `"prompt"` — the user composed a description of the invoice they want.
+ * - `"paste"` — the user pasted somebody else's text: a client email, a
+ *   WhatsApp thread, a scope note. They are copying, not composing.
+ *
+ * The distinction is not cosmetic. A pasted blob is third-party text the user
+ * did not write, so the prompt has to frame it as DATA rather than as
+ * instructions, and it gets its own (larger) size cap in `service.ts`. The
+ * output side is deliberately unchanged: both sources produce the same
+ * `InvoiceAssistantPatch`, validated by the same `normalization.ts`. Extraction
+ * is a change of input, not of architecture.
+ */
+export type AssistantInputSource = "prompt" | "paste";
+
+/**
  * What the assistant is allowed to write into the draft.
  *
  * A STRICT SUBSET of `InvoiceFormState`, and deliberately so. Three field
@@ -69,6 +86,8 @@ export interface InvoiceAssistantRequest {
   message: string;
   conversation: AssistantConversationEntry[];
   draft: InvoiceFormState;
+  /** Defaulted to `"prompt"` by `validateAssistantRequest`; never undefined here. */
+  source: AssistantInputSource;
 }
 
 export type InvoiceAssistantResolution = "ready" | "needs_clarification";
@@ -85,6 +104,7 @@ export interface InvoiceAssistantProviderInput {
   message: string;
   conversation: AssistantConversationEntry[];
   draft: InvoiceFormState;
+  source?: AssistantInputSource;
 }
 
 export interface InvoiceAssistantTelemetry {

@@ -38,6 +38,10 @@ const contentSecurityPolicy = [
   // from Google, and the print document is rendered from a blob:.
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
+  // The install manifest is a same-origin route (app/manifest.ts). This adds
+  // nothing default-src does not already grant — it is here so the policy says
+  // out loud that a manifest is expected and that it comes from us.
+  "manifest-src 'self'",
   // Everything the app calls itself is same-origin (/api/*, /_vercel/*); the
   // rest is Firebase Auth's REST surface.
   `connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://va.vercel-scripts.com${sentryConnectSrc}`,

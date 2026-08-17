@@ -5,7 +5,10 @@ import {
   MAX_TDS_RATE_PERCENT,
   clampToLimit,
   computeTotals,
+  resolveDocumentKind,
   resolveTaxContext,
+  type InvoiceDocumentKind,
+  type OriginalInvoiceRef,
   type TdsSection,
 } from "@/lib/invoice-domain";
 import {
@@ -106,6 +109,17 @@ export interface InvoiceRecord {
   taxTreatment?: TaxTreatment;
   /** Derived from `taxTreatment`, stored so the printed heading cannot drift. */
   documentType?: DocumentType;
+  /**
+   * WHAT the document is (Phase 4). ABSENT means an ordinary invoice — which is
+   * every document written before this field existed, and is also how a new
+   * invoice is stored, so both share one numbering series. See
+   * `resolveDocumentKind`.
+   */
+  documentKind?: InvoiceDocumentKind;
+  /** Rule 53(1A). Present only on a credit or debit note. */
+  originalInvoice?: OriginalInvoiceRef;
+  /** Rule 53: why the note was issued ("sales return", "post-supply discount"). */
+  reasonForIssue?: string;
   reverseCharge?: boolean;
   supplierStateCode?: string;
   placeOfSupplyStateCode?: string;
@@ -194,9 +208,32 @@ export interface InvoiceIdentityFields {
   signatureImageUrl: string;
 }
 
+/**
+ * The document-identity fields, shared verbatim by the form state and the wire
+ * payload (Phase 4).
+ *
+ * `documentKind` is REQUIRED here and always present — "invoice" is a real
+ * value, not an absence. Only the STORED record leaves it out, because an
+ * absent kind is what keeps every pre-Phase-4 document in the invoice series
+ * (see `models/Invoice.ts`); the mappers translate between the two.
+ */
+export interface InvoiceDocumentFields {
+  documentKind: InvoiceDocumentKind;
+  /**
+   * Rule 53(1A). Carried on a credit or debit note only. The server re-reads
+   * the invoice under the caller's own uid and overwrites the number and date
+   * from the stored document, so what the client sends here is a pointer, not
+   * a claim.
+   */
+  originalInvoice?: OriginalInvoiceRef;
+  /** Rule 53: why the note was issued. Free text, capped by the API. */
+  reasonForIssue: string;
+}
+
 export interface InvoiceFormState
   extends InvoiceGstFormFields,
-    InvoiceIdentityFields {
+    InvoiceIdentityFields,
+    InvoiceDocumentFields {
   companyName: string;
   companyEmail: string;
   companyPhone: string;
@@ -222,7 +259,8 @@ export interface InvoiceFormState
 
 export interface InvoicePayload
   extends Partial<InvoiceGstFormFields>,
-    InvoiceIdentityFields {
+    InvoiceIdentityFields,
+    InvoiceDocumentFields {
   /** Derived server-side from `taxTreatment`; sent only as a hint. */
   documentType?: DocumentType;
   /** Derived server-side from the geography; sent only as a hint. */
@@ -317,6 +355,12 @@ export interface InvoiceFormSeed {
   companyPan?: string;
   signatureLabel?: string;
   signatureImageUrl?: string;
+  /**
+   * WHAT is being created. Defaults to "invoice". A proforma seeds a different
+   * heading, different field labels and — the part that matters — a number out
+   * of its own series, which the caller has already asked the server for.
+   */
+  documentKind?: InvoiceDocumentKind;
 }
 
 /**
@@ -411,6 +455,10 @@ export const createDefaultInvoiceFormState = (
     dueDate: toDateInputValue(dueDate),
     terms: seed.terms ?? "Payment due within 14 days.",
     notes: "",
+    // "invoice" unless the caller asked for something else. Never absent: an
+    // absent kind is a property of a stored RECORD, not of a form.
+    documentKind: seed.documentKind ?? "invoice",
+    reasonForIssue: "",
     currency: seed.currency ?? "INR",
     status: "draft",
     items: [{ description: "", quantity: 1, unitPrice: 0 }],
@@ -475,6 +523,7 @@ export const calculateInvoiceTotals = (
     convenienceCharge: number;
     currency?: string;
   } & Partial<InvoiceGstFormFields> &
+    Partial<Pick<InvoiceDocumentFields, "documentKind">> &
     Partial<Pick<InvoiceIdentityFields, "tdsSection" | "tdsRatePercent">>
 ) =>
   computeTotals({
@@ -482,6 +531,9 @@ export const calculateInvoiceTotals = (
     discount: form.discount,
     convenienceCharge: form.convenienceCharge,
     currency: form.currency,
+    // So the preview's grand-total row is called what the printed document
+    // calls it ("Total Credited" on a credit note).
+    documentKind: resolveDocumentKind(form.documentKind),
     tds: {
       section: form.tdsSection,
       ratePercent: form.tdsRatePercent,
@@ -570,6 +622,21 @@ export const mapInvoiceRecordToFormState = (
     dueDate: toSafeDateInputValue(invoice.dueDate),
     terms: invoice.terms || "",
     notes: invoice.notes || "",
+    // An absent kind on the record IS "invoice" — every document written before
+    // Phase 4 is one, and that is also how new invoices are stored.
+    documentKind: resolveDocumentKind(invoice.documentKind),
+    ...(invoice.originalInvoice?.invoiceNumber
+      ? {
+          originalInvoice: {
+            invoiceId: invoice.originalInvoice.invoiceId || "",
+            invoiceNumber: invoice.originalInvoice.invoiceNumber,
+            invoiceDate: toSafeDateInputValue(
+              invoice.originalInvoice.invoiceDate
+            ),
+          },
+        }
+      : {}),
+    reasonForIssue: invoice.reasonForIssue || "",
     currency: invoice.currency || "INR",
     status: invoice.status || "draft",
     items:
@@ -659,6 +726,21 @@ export const mapFormStateToPayload = (
     dueDate: form.dueDate,
     terms: form.terms.trim(),
     notes: form.notes.trim(),
+    // Sent, not derived: which document this is, is a decision the user made.
+    // The API still re-validates it against the enum, refuses to let a saved
+    // document change kind, and PROVES the reference below by re-reading the
+    // invoice under the caller's own uid.
+    documentKind: resolveDocumentKind(form.documentKind),
+    ...(form.originalInvoice
+      ? {
+          originalInvoice: {
+            invoiceId: form.originalInvoice.invoiceId.trim(),
+            invoiceNumber: form.originalInvoice.invoiceNumber.trim(),
+            invoiceDate: form.originalInvoice.invoiceDate,
+          },
+        }
+      : {}),
+    reasonForIssue: (form.reasonForIssue ?? "").trim().slice(0, 200),
     currency: form.currency,
     status: form.status,
     // Ceilings as well as floors: the fields clamp as you type, but nothing
@@ -694,6 +776,65 @@ export const mapFormStateToPayload = (
     ),
     paymentInfo: form.paymentInfo.trim(),
   };
+};
+
+/**
+ * The invoice a derived document was built from, as much of it as the mapping
+ * needs. A loose shape rather than `InvoiceRecord` so the helper stays testable
+ * without constructing a whole record.
+ */
+export interface DocumentSourceRef {
+  _id?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+}
+
+/**
+ * Turn a draft copied off an existing document into a document of `kind`.
+ *
+ * Two flows use it, and they are mirror images:
+ *
+ *   - PROFORMA -> INVOICE. The whole point of a proforma is that it becomes an
+ *     invoice once the client accepts it. The caller has already given the
+ *     draft a fresh number (out of the INVOICE series) and today's dates
+ *     through `buildDuplicateFormState`; this drops the proforma-only fields.
+ *   - INVOICE -> CREDIT/DEBIT NOTE. Rule 53(1A)'s reference is attached here,
+ *     pointing at the source invoice. The server re-reads that invoice under
+ *     the caller's own uid before storing anything, so this is a convenience,
+ *     never the authority.
+ *
+ * TDS does not carry onto a note. The deduction is the CLIENT's withholding
+ * against the original invoice; a note adjusts the value of the supply, and
+ * re-stating a deduction on it would double-count against the supplier's PAN.
+ */
+export const applyDocumentKindToDraft = (
+  form: InvoiceFormState,
+  options: { documentKind: InvoiceDocumentKind; source?: DocumentSourceRef }
+): InvoiceFormState => {
+  const documentKind = resolveDocumentKind(options.documentKind);
+
+  if (documentKind === "credit_note" || documentKind === "debit_note") {
+    return {
+      ...form,
+      documentKind,
+      originalInvoice: {
+        invoiceId: options.source?._id ?? "",
+        invoiceNumber: options.source?.invoiceNumber ?? "",
+        invoiceDate: toSafeDateInputValue(options.source?.invoiceDate),
+      },
+      tdsSection: "none",
+      tdsRatePercent: 0,
+      status: "draft",
+    };
+  }
+
+  // Everything else carries no Rule 53 reference at all — a document that
+  // claims to correct another one without being a note is not a shape the API
+  // will store, and leaving the field on the draft would only produce a
+  // confusing 400.
+  const { originalInvoice: _unusedReference, ...rest } = form;
+  void _unusedReference;
+  return { ...rest, documentKind, reasonForIssue: "", status: "draft" };
 };
 
 export const formatCurrency = (value: number, currency = "INR") => {

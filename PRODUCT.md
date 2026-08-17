@@ -20,11 +20,12 @@ The scope is deliberately narrow: create, edit, track status, export. It is not 
 
 ## Positioning
 
-Three claims Invoicey can make truthfully that a general accounting suite or a Word template cannot:
+Four claims Invoicey can make truthfully that a general accounting suite or a Word template cannot:
 
 1. **AI drafting from plain language.** The user describes the job in a sentence and gets a filled invoice draft, with follow-up clarification when the description is ambiguous. This is the wedge.
-2. **Zero-setup speed.** No onboarding wizard, no company-profile prerequisite, no chart of accounts, no accounting vocabulary. Sign in, create, send.
-3. **Full workflow at $0.** No invoice caps and no feature gates, against competitors whose free tiers cap invoices or withhold exports.
+2. **AI extraction from pasted text.** The user pastes a client's email, WhatsApp message or scope note and gets the same draft. Hindi and Hinglish input are accepted; the UI stays in English. This sits beside drafting rather than replacing it: across ~1,800 competitor reviews only five mention AI and four are negative, and the one demand signal was for extraction. Describing an invoice asks the user to compose; pasting one asks them to copy. Which of the two is the headline is an open decision — see `docs/LAUNCH-PLAN.md`.
+3. **Zero-setup speed.** No onboarding wizard, no company-profile prerequisite, no chart of accounts, no accounting vocabulary. Sign in, create, send.
+4. **Full workflow at $0.** No invoice caps and no feature gates, against competitors whose free tiers cap invoices or withhold exports.
 
 ## Operating Context
 
@@ -47,10 +48,10 @@ Three claims Invoicey can make truthfully that a general accounting suite or a W
 **Constraints and terminology**
 
 - **Currency:** INR is the default. Supported set is INR, USD, EUR, GBP, AED — a closed list, not free text.
-- **Tax:** CGST and SGST are first-class, separately entered fields. A legacy single `tax` field still exists in production data and is read as a fallback; it must not be surfaced as a user-facing concept.
+- **Tax:** GST is derived, not typed. The user gives a GSTIN (or does not), a place of supply, and a rate per line; the app decides CGST+SGST, CGST+UTGST, IGST, or none. Rows render one of those sets — never all of them with zeros, which reads to an auditor as a document that does not know what it is. An unregistered user (below the ₹20 lakh services / ₹40 lakh goods thresholds) gets no tax rows at all, because §32 CGST bars them from collecting tax. Legacy single `tax` and invoice-level `cgst`/`sgst` fields still exist in production data and are read as fallbacks; neither may be surfaced as a user-facing concept.
 - **`convenienceCharge` is labeled "Service Charge" in every user-facing surface.** Never expose the internal field name.
 - **Nothing is ever hard-deleted.** This governs the *invoice* lifecycle: deleting an invoice is a soft delete, and no UI may promise permanent removal, purging, or unrecoverable deletion of one. **Account deletion is the single deliberate exception** — an explicitly irreversible action that destroys the account and every invoice under it, soft-deleted ones included. It is the only surface allowed to promise unrecoverable deletion, and it must promise it plainly. The exception exists because the DPDP Act 2023 gives the user a right of erasure that a soft delete does not satisfy.
-- **Money formula is fixed:** `subtotal − discount + CGST + SGST + Service Charge`, clamped at zero. Totals are computed server-side; client numbers are never trusted.
+- **Money formula has one home** (`computeTotals` in `lib/invoice-domain.ts`): discount is pre-tax and apportioned pro-rata across lines, tax is per line at 2dp and summed per head, and only the grand total is §170-rounded — INR only, and only when tax was actually charged. Clamped at zero. Totals are computed server-side; client numbers are never trusted. Legacy documents keep the old arithmetic exactly, because a re-print must be byte-identical to what the client already holds.
 - No team, workspace, or multi-user account model exists. One user owns their own invoices.
 - The product does not send email, take payments, or issue reminders.
 

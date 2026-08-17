@@ -65,12 +65,23 @@ export interface InvoiceDraftKeyParts {
   mode: InvoiceDraftMode;
   /** Required in edit mode; ignored in create mode. */
   invoiceId?: string;
+  /**
+   * Create mode only. A half-written proforma and a half-written invoice are
+   * two different documents, and before this they shared one key — starting a
+   * proforma silently overwrote the invoice draft, and then offered it back
+   * under the wrong heading.
+   *
+   * ABSENT (or "invoice") keeps the original key EXACTLY as it was, so every
+   * draft written before this existed still restores. Same trick, and same
+   * reason, as `documentKind` being absent on a stored invoice.
+   */
+  documentKind?: string;
 }
 
 /**
- * One key per (user, mode, invoice). Editing two invoices in two tabs must not
- * have them overwrite each other, and the create-mode draft is a third,
- * separate thing that must survive opening an existing invoice.
+ * One key per (user, mode, invoice-or-document-kind). Editing two invoices in
+ * two tabs must not have them overwrite each other, and the create-mode draft
+ * is a separate thing that must survive opening an existing invoice.
  *
  * Returns `null` when there is no user id — an unauthenticated editor has no
  * safe place to put this, and a shared "anonymous" key would leak one person's
@@ -80,6 +91,7 @@ export const invoiceDraftKey = ({
   userId,
   mode,
   invoiceId,
+  documentKind,
 }: InvoiceDraftKeyParts): string | null => {
   const uid = (userId || "").trim();
   if (!uid) {
@@ -89,7 +101,10 @@ export const invoiceDraftKey = ({
     const id = (invoiceId || "").trim();
     return id ? `${INVOICE_DRAFT_PREFIX}${uid}:edit:${id}` : null;
   }
-  return `${INVOICE_DRAFT_PREFIX}${uid}:create`;
+  const kind = (documentKind || "").trim();
+  return kind && kind !== "invoice"
+    ? `${INVOICE_DRAFT_PREFIX}${uid}:create:${kind}`
+    : `${INVOICE_DRAFT_PREFIX}${uid}:create`;
 };
 
 export interface StoredInvoiceDraft {

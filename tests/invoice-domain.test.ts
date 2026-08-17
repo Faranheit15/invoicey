@@ -106,6 +106,9 @@ describe("computeTotals — legacy mode (pre-Phase-2 documents)", () => {
       // and the exactness is the contract, so it is updated rather than
       // loosened: `null` is what "this invoice has no TDS block" looks like.
       tds: null,
+      // Phase 4 widened it by one more. A LABEL, not an amount — an invoice
+      // that has never heard of document kinds still totals to "Total".
+      grandTotalLabel: "Total",
     });
   });
 
@@ -975,6 +978,7 @@ describe("InvoiceTotals shape", () => {
           "taxableValue",
           "tds",
           "total",
+          "grandTotalLabel",
         ].sort()
       );
     }

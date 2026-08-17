@@ -19,6 +19,11 @@ import { downloadBlob } from "@/lib/download";
 import {
   buildLineItemColumns,
   buildTotalsRows,
+  documentKindSpecFor,
+  documentTaxNoticeFor,
+  documentTitleFor,
+  isCreditOrDebitNote,
+  resolveDocumentKind,
   resolveRecordAmounts,
 } from "@/lib/invoice-domain";
 import { eventsApi } from "@/lib/api-client";
@@ -48,6 +53,13 @@ interface InvoiceModalProps {
   onClose: () => void;
   onEdit?: (invoiceId: string) => void;
   onDuplicate?: (invoiceId: string) => void;
+  /**
+   * §34's correction path, offered on an INVOICE only — there is nothing to
+   * credit against a proforma, and a note against a note is meaningless.
+   */
+  onCreateNote?: (invoiceId: string, kind: "credit_note" | "debit_note") => void;
+  /** Proforma/quotation -> invoice. The whole reason a proforma is issued. */
+  onConvert?: (invoiceId: string) => void;
   onSettle?: (invoiceId: string) => Promise<void> | void;
   onDelete?: (invoiceId: string) => Promise<void> | void;
   isMutating?: boolean;
@@ -59,6 +71,8 @@ export default function InvoiceModal({
   onClose,
   onEdit,
   onDuplicate,
+  onCreateNote,
+  onConvert,
   onSettle,
   onDelete,
   isMutating = false,
@@ -68,6 +82,22 @@ export default function InvoiceModal({
   const titleId = useId();
   const currency = invoice.currency || "INR";
   const status = getInvoiceStatus(invoice);
+  // One resolver for the heading, the labels and the disclaimer — the same one
+  // the printed sheet and the editor preview read.
+  const documentKind = resolveDocumentKind(invoice.documentKind);
+  const documentSpec = documentKindSpecFor(documentKind);
+  const documentTitle = documentTitleFor({
+    documentKind,
+    documentType: invoice.documentType,
+    taxTreatment: invoice.taxTreatment,
+  });
+  const documentNotice = documentTaxNoticeFor({
+    documentKind,
+    documentType: invoice.documentType,
+    taxTreatment: invoice.taxTreatment,
+  });
+  const isNote = isCreditOrDebitNote(documentKind);
+  const isProvisional = documentKind === "proforma" || documentKind === "quotation";
   const amounts = resolveRecordAmounts(invoice);
   const totalsRows = buildTotalsRows(amounts);
   // The same column list the export and the editor preview read. Before this,
@@ -277,7 +307,7 @@ export default function InvoiceModal({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-700 dark:bg-slate-900">
           <div className="min-w-0">
             <MicroLabel as="p" variant="section">
-              Invoice
+              {documentSpec.noun}
             </MicroLabel>
             <h2
               id={titleId}
@@ -308,6 +338,37 @@ export default function InvoiceModal({
                 <CopyIcon className="w-4 h-4" />
                 Duplicate
               </Button>
+            ) : null}
+            {onConvert && isProvisional ? (
+              <Button
+                size="sm"
+                onClick={() => onConvert(invoice._id)}
+                disabled={isMutating}
+              >
+                Convert to invoice
+              </Button>
+            ) : null}
+            {/* Offered on an issued invoice only. A draft can still simply be
+                edited — nobody holds a copy of it yet. */}
+            {onCreateNote && documentKind === "invoice" && status !== "draft" ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onCreateNote(invoice._id, "credit_note")}
+                  disabled={isMutating}
+                >
+                  Credit note
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onCreateNote(invoice._id, "debit_note")}
+                  disabled={isMutating}
+                >
+                  Debit note
+                </Button>
+              </>
             ) : null}
             <ShareInvoiceButtons
               invoice={invoice}
@@ -362,7 +423,7 @@ export default function InvoiceModal({
           <article className="mx-auto max-w-4xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-md dark:border-slate-700 dark:bg-slate-950">
             <header className="flex flex-wrap justify-between gap-5 border-b border-slate-200 bg-slate-900 px-6 py-6 text-slate-100 sm:px-8 dark:border-slate-700">
               <div>
-                <MicroLabel variant="onDark">Invoice</MicroLabel>
+                <MicroLabel variant="onDark">{documentTitle}</MicroLabel>
                 <h3 className="mt-1 text-2xl font-semibold">{invoice.invoiceNumber}</h3>
                 <p className="mt-3 text-sm text-slate-300">
                   Issued by <span className="font-medium text-white">{invoice.companyName}</span>
@@ -378,13 +439,17 @@ export default function InvoiceModal({
                   />
                 ) : null}
                 <div className="space-y-2">
-                  <div className="text-slate-300">Invoice Date</div>
+                  <div className="text-slate-300">
+                    {documentSpec.printedDateLabel}
+                  </div>
                   <div className="font-medium text-white">
                     {formatDateLong(invoice.invoiceDate)}
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
-                  <div className="text-slate-300">Due Date</div>
+                  <div className="text-slate-300">
+                    {documentSpec.printedDueDateLabel}
+                  </div>
                   <div className="font-medium text-white">
                     {formatDateLong(invoice.dueDate)}
                   </div>
@@ -396,6 +461,34 @@ export default function InvoiceModal({
                 </span>
               </div>
             </header>
+
+            {documentNotice ? (
+              <p className="border-b border-slate-200 bg-slate-100 px-6 py-2 text-xs font-semibold leading-relaxed text-slate-800 sm:px-8 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                {documentNotice}
+              </p>
+            ) : null}
+
+            {/* Rule 53(1A): the invoice this note corrects. Shown here as well
+                as on the printed sheet — this is the screen the user checks
+                before sending, so it has to carry the same particulars. */}
+            {isNote && invoice.originalInvoice?.invoiceNumber ? (
+              <section className="border-b border-slate-200 px-6 py-4 text-sm sm:px-8 dark:border-slate-700">
+                <MicroLabel as="p" variant="section">
+                  Against invoice
+                </MicroLabel>
+                <p className="mt-1 font-medium text-slate-900 dark:text-slate-100">
+                  {invoice.originalInvoice.invoiceNumber}
+                  {invoice.originalInvoice.invoiceDate
+                    ? ` · ${formatDateLong(invoice.originalInvoice.invoiceDate)}`
+                    : ""}
+                </p>
+                {invoice.reasonForIssue ? (
+                  <p className="mt-1 text-slate-600 dark:text-slate-300">
+                    {invoice.reasonForIssue}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
 
             <section className="grid gap-4 border-b border-slate-200 px-6 py-5 sm:grid-cols-2 sm:px-8 dark:border-slate-700">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">

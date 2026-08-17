@@ -8,17 +8,18 @@ import {
   resolveRecordAmounts,
   buildLineItemColumns,
   buildTotalsRows,
+  documentKindSpecFor,
+  documentTaxNoticeFor,
+  documentTitleFor,
+  isCreditOrDebitNote,
   type LineItemColumn,
   type LineItemTableInput,
 } from "@/lib/invoice-domain";
 import {
   COMPOSITION_BANNER,
-  DOCUMENT_TITLES,
   EXPORT_ENDORSEMENT_UNDER_LUT,
   EXPORT_ENDORSEMENT_WITH_TAX,
   TAX_SUPPRESSION_NOTES,
-  documentTypeFor,
-  type DocumentType,
   type SupplyKind,
   type TaxTreatment,
 } from "@/lib/gst-supply";
@@ -187,17 +188,48 @@ export const buildLineItemCells = (
 /* -------------------------------------------------------------------------- */
 
 /**
- * The document heading. A record written before Phase 2 carries no
- * `taxTreatment` at all and keeps the plain "INVOICE" it has always printed —
- * re-printing a document a client already holds must not change its heading.
+ * The document heading, from the SHARED resolver in `lib/invoice-domain.ts`.
+ *
+ * Two axes collapse here: `documentKind` says what the document is (a proforma
+ * is never a tax invoice, whatever its author's GST status), and `documentType`
+ * says what tax shape it has. A record written before Phase 2 carries neither
+ * and keeps the plain "INVOICE" it has always printed — re-printing a document
+ * a client already holds must not change its heading.
  */
-const documentTypeForRecord = (invoice: InvoiceRecord): DocumentType => {
-  if (invoice.documentType) {
-    return invoice.documentType;
+const documentTitleForRecord = (invoice: InvoiceRecord): string =>
+  documentTitleFor({
+    documentKind: invoice.documentKind,
+    documentType: invoice.documentType,
+    taxTreatment: invoice.taxTreatment,
+  });
+
+/**
+ * Rule 53(1A): a credit or debit note must carry the serial number and date of
+ * the invoice it corrects, and (by convention, and because it is the first
+ * thing anyone reading it asks) why it was issued.
+ *
+ * Printed for notes only, and independently of `gstDetailRows` — those rows are
+ * gated on the document having a `taxTreatment`, while these particulars are
+ * required of a note whether or not its author is registered.
+ */
+const noteReferenceRows = (invoice: InvoiceRecord): Array<[string, string]> => {
+  if (!isCreditOrDebitNote(invoice.documentKind)) {
+    return [];
   }
-  return invoice.taxTreatment
-    ? documentTypeFor(invoice.taxTreatment)
-    : "invoice";
+  const rows: Array<[string, string]> = [];
+  const number = (invoice.originalInvoice?.invoiceNumber ?? "").trim();
+  if (number) {
+    rows.push(["Original Invoice Number", number]);
+  }
+  const date = invoice.originalInvoice?.invoiceDate;
+  if (date) {
+    rows.push(["Original Invoice Date", formatDateLong(date)]);
+  }
+  const reason = (invoice.reasonForIssue ?? "").trim();
+  if (reason) {
+    rows.push(["Reason", reason]);
+  }
+  return rows;
 };
 
 /**
@@ -419,7 +451,15 @@ export const createInvoiceHtml = (
   const status = getInvoiceStatus(invoice).toUpperCase();
   const currency = invoice.currency || "INR";
   const logoUrl = toSafeImageUrl(invoice.companyLogo);
-  const documentType = documentTypeForRecord(invoice);
+  const documentTitle = documentTitleForRecord(invoice);
+  const documentSpec = documentKindSpecFor(invoice.documentKind);
+  // "This is not a tax invoice." on a proforma or a quotation; the commercial
+  // disclaimer on a note from an unregistered supplier; nothing otherwise.
+  const documentNotice = documentTaxNoticeFor({
+    documentKind: invoice.documentKind,
+    documentType: invoice.documentType,
+    taxTreatment: invoice.taxTreatment,
+  });
   const tableInput: LineItemTableInput = {
     items: invoice.items || [],
     totals: amounts,
@@ -431,7 +471,7 @@ export const createInvoiceHtml = (
     ? TAX_SUPPRESSION_NOTES[amounts.suppressedBecause]
     : "";
   const amountInWords = amountInWordsIndian(amounts.total, currency);
-  const gstRows = gstDetailRows(invoice);
+  const gstRows = [...noteReferenceRows(invoice), ...gstDetailRows(invoice)];
   const companyGstin = (invoice.companyGstin ?? "").trim();
   const companyPan = (invoice.companyPan ?? "").trim();
   const billToGstin = (invoice.billToGstin ?? "").trim();
@@ -518,7 +558,7 @@ export const createInvoiceHtml = (
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${escapeHtml(DOCUMENT_TITLES[documentType])} ${toSafeValue(
+    <title>${escapeHtml(documentTitle)} ${toSafeValue(
     invoice.invoiceNumber
   )}</title>
     <style>
@@ -1001,7 +1041,7 @@ export const createInvoiceHtml = (
               : ""
           }
           <div class="brand">
-            <h1>${escapeHtml(DOCUMENT_TITLES[documentType])}</h1>
+            <h1>${escapeHtml(documentTitle)}</h1>
             <p>
               <strong>${toSafeValue(invoice.companyName)}</strong><br />
               ${toLineBreaks(invoice.companyAddress)}<br />
@@ -1012,16 +1052,21 @@ export const createInvoiceHtml = (
           </div>
         </div>
         <div class="meta">
-          <div class="label">Invoice Number</div>
+          <div class="label">${escapeHtml(documentSpec.printedNumberLabel)}</div>
           <div class="value">${toSafeValue(invoice.invoiceNumber)}</div>
-          <div class="label">Invoice Date</div>
+          <div class="label">${escapeHtml(documentSpec.printedDateLabel)}</div>
           <div class="value">${escapeHtml(formatDateLong(invoice.invoiceDate))}</div>
-          <div class="label">Due Date</div>
+          <div class="label">${escapeHtml(documentSpec.printedDueDateLabel)}</div>
           <div class="value">${escapeHtml(formatDateLong(invoice.dueDate))}</div>
           <span class="status">${escapeHtml(status)}</span>
         </div>
       </section>
 
+      ${
+        documentNotice
+          ? `<p class="statute">${escapeHtml(documentNotice)}</p>`
+          : ""
+      }
       ${
         invoice.taxTreatment === "composition"
           ? `<p class="statute">${escapeHtml(COMPOSITION_BANNER)}</p>`
@@ -1225,19 +1270,30 @@ export const createInvoiceCsv = (invoice: InvoiceRecord) => {
   const endorsement = exportEndorsementFor(invoice);
   const amountInWords = amountInWordsIndian(amounts.total, currency);
 
+  const documentSpec = documentKindSpecFor(invoice.documentKind);
+  const documentNotice = documentTaxNoticeFor({
+    documentKind: invoice.documentKind,
+    documentType: invoice.documentType,
+    taxTreatment: invoice.taxTreatment,
+  });
+
   const rows: Array<Array<string | undefined>> = [
-    ["Invoice Number", invoice.invoiceNumber],
-    ["Document Type", DOCUMENT_TITLES[documentTypeForRecord(invoice)]],
+    [documentSpec.printedNumberLabel, invoice.invoiceNumber],
+    ["Document Type", documentTitleForRecord(invoice)],
     ["Company", invoice.companyName],
     ["Client", invoice.billTo],
-    ["Invoice Date", formatDateLong(invoice.invoiceDate)],
-    ["Due Date", formatDateLong(invoice.dueDate)],
+    [documentSpec.printedDateLabel, formatDateLong(invoice.invoiceDate)],
+    [documentSpec.printedDueDateLabel, formatDateLong(invoice.dueDate)],
     ["Currency", currency],
     // Same label/value pairs the HTML prints, from the same builders. The party
     // identities are rendered inside the address boxes on the sheet; the CSV
     // has no address boxes, so they become ordinary header rows here.
     ...partyIdentityRows(invoice).map(([label, value]) => [label, value]),
+    // Rule 53(1A) particulars, ahead of the GST block for the same reason they
+    // are printed first on the sheet: a note is defined by what it corrects.
+    ...noteReferenceRows(invoice).map(([label, value]) => [label, value]),
     ...gstDetailRows(invoice).map(([label, value]) => [label, value]),
+    ...(documentNotice ? [["Declaration", documentNotice]] : []),
     ...(invoice.taxTreatment === "composition"
       ? [["Declaration", COMPOSITION_BANNER]]
       : []),

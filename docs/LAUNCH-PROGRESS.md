@@ -226,8 +226,46 @@ index in the background, off-hours.
 
 ## Phase 4 — Strategic bets
 
-- [ ] Anonymous first invoice
-- [ ] AI extraction alongside generation
-- [ ] Proforma / quotation
-- [ ] Credit / debit notes
-- [ ] PWA install
+- [ ] Anonymous first invoice — **not built.** It is the one Phase 4 bet that
+      contradicts the current mandatory-verification posture, and the launch
+      plan lists it as an open decision. Owner's call.
+- [x] AI extraction alongside generation
+- [x] Proforma / quotation
+- [x] Credit / debit notes
+- [x] PWA install
+
+---
+
+## Owner actions before launch
+
+Nothing below can be done from inside the repository.
+
+1. **Invoice numbering migration.** Run `bun run migrate:invoice-numbering`,
+   resolve the duplicates it reports, then **drop the old unique index before
+   creating the new one** — the old key would keep enforcing uniqueness across
+   document series. Build it off-hours. The migration reports rather than
+   renumbers, deliberately: the number is printed on a document the client
+   already holds.
+2. **Move off the free Gemini key.** `/privacy` currently states, accurately,
+   that free-tier prompts may be used to improve Google's products — and the
+   prompt carries the user's clients' names, addresses and amounts. Then update
+   that paragraph.
+3. **Run `bun run migrate:purge-tokens`**, then rotate database backups and
+   revoke Firebase refresh tokens.
+4. **Fill every legal placeholder** in `components/legal.tsx` and the region and
+   jurisdiction values on `/privacy` and `/terms`, and have a lawyer read both.
+5. **Provision the operational accounts:** Sentry project + DSN, R2 bucket with
+   write-only token and lifecycle rules, an `age` keypair with the private key
+   held offline, least-privilege Atlas users, a Google Cloud budget alert, and
+   an uptime monitor on `/api/health`.
+6. **Add `.github/workflows/`** from `docs/runbooks/backup-and-restore.md`.
+   Until those files exist there is no backup running.
+
+## Known gaps, recorded rather than hidden
+
+- Admin analytics counts proformas and credit notes as invoices.
+- Rule 46(e)/(n): no delivery-address field exists in the schema.
+- An unregistered user cannot declare an export in the editor UI, so no
+  destination country prints for them. Legal, but incomplete.
+- The report-only CSP has never been flipped to enforcing; do that after
+  reading real violation reports from `/api/csp-report`.

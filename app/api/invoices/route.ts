@@ -10,8 +10,13 @@ import {
   TDS_SECTIONS,
   clampToLimit,
   computeTotals,
+  documentKindSpecFor,
+  isCreditOrDebitNote,
+  resolveDocumentKind,
   resolveTaxContext,
   validateInvoice,
+  type InvoiceDocumentKind,
+  type OriginalInvoiceRef,
   type TdsSection,
 } from "@/lib/invoice-domain";
 import {
@@ -133,6 +138,20 @@ interface RawInvoicePayload {
   withPaymentOfTax?: boolean;
   lutArn?: string;
   countryOfDestination?: string;
+  /**
+   * WHAT the document is. READ from the request, unlike `documentType` — a
+   * proforma is a decision the user makes, not something derivable from their
+   * GST status. Validated against the enum, frozen after the first save, and
+   * (for a note) proved against a real invoice before anything is written.
+   */
+  documentKind?: string;
+  /** Rule 53(1A). Only `invoiceId` is read; the rest is re-derived server-side. */
+  originalInvoice?: {
+    invoiceId?: string;
+    invoiceNumber?: string;
+    invoiceDate?: string;
+  };
+  reasonForIssue?: string;
   // `documentType` and `supplyKind` are deliberately NOT read from the request:
   // both are re-derived below so a client cannot head an unregistered document
   // "TAX INVOICE" or claim an intra-State supply is inter-State.
@@ -214,6 +233,15 @@ interface NormalizedInvoicePayload extends Partial<NormalizedGstFields> {
   tdsAmount: number;
   signatureLabel: string;
   signatureImageUrl: string;
+  /**
+   * `undefined` for an ordinary invoice, and that is not laziness — an absent
+   * `documentKind` is what puts new invoices and every pre-Phase-4 document in
+   * ONE index key space. See the unique index in `models/Invoice.ts`.
+   */
+  documentKind?: InvoiceDocumentKind;
+  /** Rule 53(1A), rebuilt from the STORED invoice. Undefined on anything else. */
+  originalInvoice?: OriginalInvoiceRef;
+  reasonForIssue: string;
 }
 
 const INVOICE_AUTH_MESSAGES = {
@@ -403,7 +431,23 @@ const normalizeGstFields = (
   };
 };
 
-const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
+/**
+ * What the route has already PROVED about the document before normalising it:
+ * which series it belongs to, and — for a credit or debit note — the invoice it
+ * corrects, re-read from the database under the caller's own uid.
+ *
+ * Passed in rather than derived from `raw` because proving it needs a query,
+ * and `normalizePayload` stays synchronous and request-only by design.
+ */
+interface DocumentContext {
+  documentKind: InvoiceDocumentKind;
+  originalInvoice: OriginalInvoiceRef | null;
+}
+
+const normalizePayload = (
+  raw: RawInvoicePayload,
+  document: DocumentContext
+): NormalizedInvoicePayload => {
   const items = normalizeItems(raw.items || []);
   const gst = normalizeGstFields(raw);
 
@@ -537,6 +581,19 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
     tdsAmount: totals.tds?.amount ?? 0,
     signatureLabel: cleanString(raw.signatureLabel).slice(0, 120),
     signatureImageUrl: cleanImageUrl(raw.signatureImageUrl),
+    // An ordinary invoice stores NO kind — see `NormalizedInvoicePayload`. On a
+    // PUT this reaches `Object.assign`, where an explicit `undefined` is how
+    // Mongoose unsets a path, so a document can never keep a stale kind.
+    documentKind:
+      document.documentKind === "invoice" ? undefined : document.documentKind,
+    // Only what the ROUTE resolved. A proforma or an invoice that arrived with
+    // an `originalInvoice` in its body stores none: Rule 53's reference belongs
+    // to notes, and a document that claims to correct another one without being
+    // a note is not a shape this app is willing to persist.
+    originalInvoice: document.originalInvoice ?? undefined,
+    reasonForIssue: isCreditOrDebitNote(document.documentKind)
+      ? cleanString(raw.reasonForIssue).slice(0, 200)
+      : "",
   };
 };
 
@@ -591,16 +648,25 @@ const omitsTaxTreatment = (raw: RawInvoicePayload): boolean =>
  */
 const nextNumberForYear = async (
   userUid: string,
-  financialYear: string
+  financialYear: string,
+  documentKind: InvoiceDocumentKind = "invoice"
 ): Promise<string | null> => {
   const range = financialYearRange(financialYear);
   if (!range) {
     return null;
   }
+  const spec = documentKindSpecFor(documentKind);
   const rows = (await Invoice.find(
     {
       userId: userUid,
       invoiceDate: { $gte: range.start, $lt: range.end },
+      // SERIES ISOLATION, and the asymmetry is deliberate. An ordinary invoice
+      // stores no `documentKind` at all, so its series is matched with
+      // `null` — which in Mongo means "missing or null" and therefore covers
+      // every document written before Phase 4 as well. Anything else matches
+      // its own value, so a proforma can never be offered a number out of the
+      // invoice sequence, or vice versa.
+      documentKind: documentKind === "invoice" ? null : documentKind,
     },
     { invoiceNumber: 1 }
   )
@@ -611,7 +677,149 @@ const nextNumberForYear = async (
   return suggestInvoiceNumber({
     financialYear,
     previous: highestInvoiceNumber(rows.map((row) => row.invoiceNumber)),
+    pattern: spec.numberPattern,
+    fallbackPattern: spec.fallbackNumberPattern,
   });
+};
+
+/** `yyyy-mm-dd` from whatever the store gave back (a `Date`, or a string). */
+const toDateOnly = (value: unknown): string => {
+  if (!value) {
+    return "";
+  }
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
+};
+
+interface OriginalInvoiceOutcome {
+  ref?: OriginalInvoiceRef;
+  error?: { message: string; status: number };
+}
+
+/**
+ * Prove the invoice a credit or debit note refers to, and rebuild the Rule
+ * 53(1A) particulars FROM THE STORED DOCUMENT.
+ *
+ * Three refusals, all of them the same refusal from different angles: a note
+ * may not be issued against an invoice that does not exist, that belongs to
+ * another user, or that has been soft-deleted. The lookup is scoped to the uid
+ * from the verified token and carries `is_deleted: { $ne: true }` — the same
+ * predicate every other read in this file uses — so all three collapse into one
+ * "not found", and a caller cannot learn whether the id exists under someone
+ * else's account.
+ *
+ * A fourth refusal is about meaning rather than access: a credit note against a
+ * proforma, a quotation or another credit note adjusts nothing, because none of
+ * those created a liability to adjust.
+ *
+ * The number and date are then taken from the stored invoice and NOT from the
+ * request, so the printed particulars are the real ones even if the body said
+ * otherwise.
+ */
+const resolveOriginalInvoice = async (
+  userUid: string,
+  documentKind: InvoiceDocumentKind,
+  invoiceId: string
+): Promise<OriginalInvoiceOutcome> => {
+  const noun = documentKind === "debit_note" ? "debit note" : "credit note";
+  const trimmedId = cleanString(invoiceId);
+  if (!trimmedId) {
+    return {
+      error: {
+        message: `A ${noun} must reference the invoice it corrects.`,
+        status: 400,
+      },
+    };
+  }
+
+  type StoredOriginal = {
+    _id?: unknown;
+    invoiceNumber?: string;
+    invoiceDate?: unknown;
+    documentKind?: string;
+  } | null;
+
+  let original: StoredOriginal = null;
+  try {
+    original = (await Invoice.findOne({
+      _id: trimmedId,
+      userId: userUid,
+      is_deleted: { $ne: true },
+    })) as StoredOriginal;
+  } catch (error: unknown) {
+    // A malformed id makes Mongoose throw a CastError before it queries
+    // anything. For this purpose an id that cannot even be an id is the same
+    // answer as one that matches nothing — and letting it reach the outer
+    // handler would turn a bad reference into a 500. Anything else is a real
+    // database failure and still propagates.
+    if (!isNotFoundOrInvalidIdError(error)) {
+      throw error;
+    }
+  }
+
+  if (!original) {
+    return {
+      error: {
+        message: `The invoice this ${noun} refers to no longer exists.`,
+        status: 404,
+      },
+    };
+  }
+  if (resolveDocumentKind(original.documentKind) !== "invoice") {
+    return {
+      error: {
+        message: `A ${noun} can only be issued against an invoice.`,
+        status: 400,
+      },
+    };
+  }
+
+  const invoiceDate = toDateOnly(original.invoiceDate);
+  if (!original.invoiceNumber || !invoiceDate) {
+    return {
+      error: {
+        message: `That invoice has no number or date, so a ${noun} cannot reference it.`,
+        status: 400,
+      },
+    };
+  }
+
+  return {
+    ref: {
+      invoiceId: String(original._id),
+      invoiceNumber: original.invoiceNumber,
+      invoiceDate,
+    },
+  };
+};
+
+/**
+ * The document context for a write: the series, plus the proved reference.
+ *
+ * Returns an error rather than throwing so both write paths surface the same
+ * status and copy.
+ */
+const resolveDocumentContext = async (input: {
+  userUid: string;
+  documentKind: InvoiceDocumentKind;
+  invoiceId: string | undefined;
+}): Promise<{ context?: DocumentContext; error?: { message: string; status: number } }> => {
+  if (!isCreditOrDebitNote(input.documentKind)) {
+    return {
+      context: { documentKind: input.documentKind, originalInvoice: null },
+    };
+  }
+  const outcome = await resolveOriginalInvoice(
+    input.userUid,
+    input.documentKind,
+    input.invoiceId ?? ""
+  );
+  if (outcome.error || !outcome.ref) {
+    return { error: outcome.error };
+  }
+  return {
+    context: { documentKind: input.documentKind, originalInvoice: outcome.ref },
+  };
 };
 
 /**
@@ -625,17 +833,23 @@ const duplicateNumberResponse = async (input: {
   userUid: string;
   invoiceNumber: string;
   financialYear: string;
+  documentKind: InvoiceDocumentKind;
 }) => {
   let suggestion: string | null = null;
   try {
-    suggestion = await nextNumberForYear(input.userUid, input.financialYear);
+    suggestion = await nextNumberForYear(
+      input.userUid,
+      input.financialYear,
+      input.documentKind
+    );
   } catch {
     // A failed suggestion must not turn a clear 409 into a 500.
     suggestion = null;
   }
+  const noun = documentKindSpecFor(input.documentKind).noun;
   return NextResponse.json(
     {
-      error: `Invoice number ${input.invoiceNumber} is already used in ${input.financialYear}.${
+      error: `${noun} number ${input.invoiceNumber} is already used in ${input.financialYear}.${
         suggestion ? ` Try ${suggestion}.` : ""
       }`,
       code: "DUPLICATE_INVOICE_NUMBER",
@@ -679,9 +893,17 @@ export async function GET(req: NextRequest) {
         );
       }
 
+      // Which SERIES to continue. Unknown values fall back to "invoice"
+      // (`resolveDocumentKind`), so a typo cannot silently open a fifth series.
+      const documentKind = resolveDocumentKind(searchParams.get("kind"));
+
       const suggestion: InvoiceNumberSuggestion = {
         financialYear,
-        invoiceNumber: await nextNumberForYear(userUid, financialYear),
+        invoiceNumber: await nextNumberForYear(
+          userUid,
+          financialYear,
+          documentKind
+        ),
       };
       return NextResponse.json(suggestion);
     }
@@ -754,7 +976,23 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const payload = normalizePayload(rawPayload);
+
+    // The series, and — for a credit or debit note — the invoice it corrects,
+    // proved against the database under this caller's uid before anything is
+    // normalised, validated or written.
+    const { context, error: documentError } = await resolveDocumentContext({
+      userUid,
+      documentKind: resolveDocumentKind(rawPayload.documentKind),
+      invoiceId: rawPayload.originalInvoice?.invoiceId,
+    });
+    if (documentError || !context) {
+      return NextResponse.json(
+        { error: documentError?.message ?? "Invalid document" },
+        { status: documentError?.status ?? 400 }
+      );
+    }
+
+    const payload = normalizePayload(rawPayload, context);
     // The head rollups go in as a tripwire: an inter-State supply that somehow
     // produced CGST/SGST (or the reverse) is a bug in the derivation, not a
     // user error, and it must not reach a client's inbox.
@@ -785,6 +1023,7 @@ export async function POST(req: NextRequest) {
           userUid,
           invoiceNumber: payload.invoiceNumber,
           financialYear: payload.financialYear,
+          documentKind: context.documentKind,
         });
       }
       throw error;
@@ -804,6 +1043,10 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error: unknown) {
+    if (isNotFoundOrInvalidIdError(error)) {
+      return NextResponse.json({ error: "Invalid invoice id" }, { status: 400 });
+    }
+
     logRouteError(error, {
       req,
       route: "POST /api/invoices",
@@ -862,7 +1105,44 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const payload = normalizePayload(rawPayload);
+    /**
+     * A DOCUMENT CANNOT CHANGE KIND. An invoice that could be turned into a
+     * credit note by a PUT would move between numbering series while keeping a
+     * number issued in the other one, and would acquire (or shed) Rule 53
+     * particulars on a document a client already holds. Correcting an issued
+     * invoice is what the credit note is FOR; it is a new document, not an edit.
+     */
+    const storedKind = resolveDocumentKind(
+      existingInvoice.documentKind as string | undefined
+    );
+    const requestedKind = resolveDocumentKind(rawPayload.documentKind);
+    if (requestedKind !== storedKind) {
+      return NextResponse.json(
+        {
+          error: `A saved ${documentKindSpecFor(storedKind).noun.toLowerCase()} cannot be turned into a ${documentKindSpecFor(requestedKind).noun.toLowerCase()}. Create a new document instead.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Re-proved on every write, not trusted from the stored copy: an edit may
+    // repoint the note at a different invoice, and the invoice it already
+    // pointed at may have been deleted since.
+    const { context, error: documentError } = await resolveDocumentContext({
+      userUid,
+      documentKind: storedKind,
+      invoiceId:
+        rawPayload.originalInvoice?.invoiceId ||
+        (existingInvoice.originalInvoice?.invoiceId as string | undefined),
+    });
+    if (documentError || !context) {
+      return NextResponse.json(
+        { error: documentError?.message ?? "Invalid document" },
+        { status: documentError?.status ?? 400 }
+      );
+    }
+
+    const payload = normalizePayload(rawPayload, context);
     // The head rollups go in as a tripwire: an inter-State supply that somehow
     // produced CGST/SGST (or the reverse) is a bug in the derivation, not a
     // user error, and it must not reach a client's inbox.
@@ -891,6 +1171,7 @@ export async function PUT(req: NextRequest) {
           userUid,
           invoiceNumber: payload.invoiceNumber,
           financialYear: payload.financialYear,
+          documentKind: context.documentKind,
         });
       }
       throw error;

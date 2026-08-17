@@ -85,6 +85,7 @@ export const generateInvoiceAssistantCompletion = async ({
   message,
   conversation,
   draft,
+  source,
 }: InvoiceAssistantProviderInput): Promise<InvoiceAssistantProviderOutput> => {
   const provider = getProvider();
   if (provider !== "gemini") {
@@ -98,6 +99,7 @@ export const generateInvoiceAssistantCompletion = async ({
     message,
     conversation,
     draft,
+    source,
     currentDate: new Date().toISOString().slice(0, 10),
   });
 

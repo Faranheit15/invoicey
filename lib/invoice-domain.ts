@@ -1,11 +1,14 @@
 import type { InvoiceRecord } from "@/lib/invoices";
 import {
+  DOCUMENT_TITLES,
+  documentTypeFor,
   inferLegacyTaxTreatment,
   isRetiredGstRate,
   isServiceHsnSac,
   resolveTaxPresentation,
   splitLineTax,
   TAX_HEAD_LABELS,
+  type DocumentType,
   type LineTax,
   type SupplyKind,
   type TaxHead,
@@ -18,8 +21,12 @@ import {
   stateCodeFromGstin,
 } from "@/lib/gstin";
 import {
+  DEFAULT_INVOICE_NUMBER_PATTERN,
+  FALLBACK_INVOICE_NUMBER_PATTERN,
   checkInvoiceNumber,
+  deriveFinancialYear,
   invoiceNumberProblemMessage,
+  isFinancialYear,
   normalizeInvoiceNumber,
 } from "@/lib/invoice-number";
 import { isAcceptedGstRate } from "@/lib/gst-rates";
@@ -66,6 +73,297 @@ export const MAX_MONEY_VALUE = 100_000_000;
 /** Clamp a money-ish number into [0, limit]; NaN and friends collapse to 0. */
 export const clampToLimit = (value: number, limit: number, floor = 0): number =>
   Math.min(limit, Math.max(floor, Number.isFinite(value) ? value : floor));
+
+/* -------------------------------------------------------------------------- */
+/* Document kinds (Phase 4)                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * WHAT a document is, as opposed to what tax SHAPE it has.
+ *
+ * `documentType` (lib/gst-supply) answers the second question and is derived
+ * from `taxTreatment`: TAX INVOICE / INVOICE / BILL OF SUPPLY. It cannot answer
+ * the first — a proforma issued by a registered supplier would derive
+ * "tax_invoice" and print a heading that is, under Rule 46, a false statement.
+ *
+ * So the two axes are kept separate. `documentKind` is CHOSEN (a proforma is a
+ * decision, not a derivation), `documentType` stays DERIVED, and the printed
+ * heading is `documentTitleFor`, where the kind overrides the tax shape when it
+ * has an opinion.
+ *
+ * ABSENCE MEANS "invoice". Every document ever written by this app before this
+ * phase is an ordinary invoice, and `resolveDocumentKind(undefined)` says so —
+ * which is also what keeps them in the SAME numbering series as new invoices
+ * (see the unique index in models/Invoice.ts). Unlike `taxTreatment`, absence
+ * here carries no legacy behaviour: there is nothing to distinguish.
+ */
+export type InvoiceDocumentKind =
+  | "invoice"
+  | "proforma"
+  | "quotation"
+  | "credit_note"
+  | "debit_note";
+
+export const INVOICE_DOCUMENT_KINDS: readonly InvoiceDocumentKind[] = [
+  "invoice",
+  "proforma",
+  "quotation",
+  "credit_note",
+  "debit_note",
+];
+
+/**
+ * Rule 53(1A): a credit or debit note must carry the "serial number(s) and
+ * date(s) of the corresponding tax invoice(s)". Modelled explicitly rather than
+ * as a loose `originalInvoiceNumber` string, because the id is what lets the
+ * server PROVE the reference — it re-reads the invoice under the caller's own
+ * uid and rewrites the number and date from the stored document, so a note can
+ * never name an invoice that does not exist, belongs to someone else, or has
+ * been deleted.
+ */
+export interface OriginalInvoiceRef {
+  /** Mongo `_id` of the invoice being corrected. */
+  invoiceId: string;
+  /** As printed on that invoice. Server-derived, never trusted from a request. */
+  invoiceNumber: string;
+  /** `yyyy-mm-dd`. Server-derived. */
+  invoiceDate: string;
+}
+
+export interface DocumentKindSpec {
+  kind: InvoiceDocumentKind;
+  /**
+   * The printed heading, or `null` to defer to `DOCUMENT_TITLES[documentType]`.
+   * A non-null title always WINS: that is what stops a proforma from a
+   * registered supplier being headed "TAX INVOICE".
+   */
+  title: string | null;
+  /** Sentence-case noun for UI chrome ("Create a proforma"). */
+  noun: string;
+  numberLabel: string;
+  dateLabel: string;
+  /**
+   * The `dueDate` field's label. A proforma's validity date is the same field
+   * under a different name — a second `validUntil` column would be one more
+   * thing to keep in sync across four renderers for no extra information.
+   */
+  dueDateLabel: string;
+  /**
+   * The same three labels as PRINTED on the document, in the Title Case the
+   * sheet's meta block has always used. Two sets rather than one case-folding
+   * helper: the form's labels sit beside "Company name" and "Client email" and
+   * have to match those, and a locale-aware case transform on a legal document
+   * is exactly the kind of thing that quietly breaks in Turkish.
+   */
+  printedNumberLabel: string;
+  printedDateLabel: string;
+  printedDueDateLabel: string;
+  /**
+   * SEPARATE SERIES, and this is the point. Rule 46(b)'s "unique for a
+   * financial year" is per series; a proforma numbered into the invoice series
+   * leaves a gap in a sequence the law requires to be consecutive, which is the
+   * first thing an auditor asks about.
+   */
+  numberPattern: string;
+  /** Used when `numberPattern` renders past sixteen characters. */
+  fallbackNumberPattern: string;
+  /** Grand-total row label. A credit note credits; it does not "total". */
+  grandTotalLabel: string;
+  /** Rule 53: the note must name the invoice it corrects. */
+  requiresOriginalInvoice: boolean;
+}
+
+export const DOCUMENT_KIND_SPECS: Record<InvoiceDocumentKind, DocumentKindSpec> = {
+  invoice: {
+    kind: "invoice",
+    title: null,
+    noun: "Invoice",
+    numberLabel: "Invoice number",
+    dateLabel: "Invoice date",
+    dueDateLabel: "Due date",
+    printedNumberLabel: "Invoice Number",
+    printedDateLabel: "Invoice Date",
+    printedDueDateLabel: "Due Date",
+    numberPattern: DEFAULT_INVOICE_NUMBER_PATTERN,
+    fallbackNumberPattern: FALLBACK_INVOICE_NUMBER_PATTERN,
+    grandTotalLabel: "Total",
+    requiresOriginalInvoice: false,
+  },
+  proforma: {
+    kind: "proforma",
+    title: "PROFORMA INVOICE",
+    noun: "Proforma invoice",
+    numberLabel: "Proforma number",
+    dateLabel: "Proforma date",
+    dueDateLabel: "Valid until",
+    printedNumberLabel: "Proforma Number",
+    printedDateLabel: "Proforma Date",
+    printedDueDateLabel: "Valid Until",
+    // "PI/2026-27/001" is 14 characters. Never "INV/…": a proforma sharing the
+    // tax-invoice prefix is exactly the confusion the separate series exists to
+    // prevent.
+    numberPattern: "PI/{FY}/{SEQ:3}",
+    fallbackNumberPattern: "PI/{FY2}/{SEQ:4}",
+    grandTotalLabel: "Total",
+    requiresOriginalInvoice: false,
+  },
+  quotation: {
+    kind: "quotation",
+    title: "QUOTATION",
+    noun: "Quotation",
+    numberLabel: "Quotation number",
+    dateLabel: "Quotation date",
+    dueDateLabel: "Valid until",
+    printedNumberLabel: "Quotation Number",
+    printedDateLabel: "Quotation Date",
+    printedDueDateLabel: "Valid Until",
+    numberPattern: "QT/{FY}/{SEQ:3}",
+    fallbackNumberPattern: "QT/{FY2}/{SEQ:4}",
+    grandTotalLabel: "Total",
+    requiresOriginalInvoice: false,
+  },
+  credit_note: {
+    kind: "credit_note",
+    title: "CREDIT NOTE",
+    noun: "Credit note",
+    numberLabel: "Credit note number",
+    dateLabel: "Credit note date",
+    dueDateLabel: "Adjustment date",
+    printedNumberLabel: "Credit Note Number",
+    printedDateLabel: "Credit Note Date",
+    printedDueDateLabel: "Adjustment Date",
+    numberPattern: "CN/{FY}/{SEQ:3}",
+    fallbackNumberPattern: "CN/{FY2}/{SEQ:4}",
+    grandTotalLabel: "Total Credited",
+    requiresOriginalInvoice: true,
+  },
+  debit_note: {
+    kind: "debit_note",
+    title: "DEBIT NOTE",
+    noun: "Debit note",
+    numberLabel: "Debit note number",
+    dateLabel: "Debit note date",
+    dueDateLabel: "Payable by",
+    printedNumberLabel: "Debit Note Number",
+    printedDateLabel: "Debit Note Date",
+    printedDueDateLabel: "Payable By",
+    numberPattern: "DN/{FY}/{SEQ:3}",
+    fallbackNumberPattern: "DN/{FY2}/{SEQ:4}",
+    grandTotalLabel: "Total Debited",
+    requiresOriginalInvoice: true,
+  },
+};
+
+/** Absent, unknown or malformed all mean "an ordinary invoice". */
+export const resolveDocumentKind = (
+  value: string | null | undefined
+): InvoiceDocumentKind =>
+  (INVOICE_DOCUMENT_KINDS as readonly string[]).includes(value ?? "")
+    ? (value as InvoiceDocumentKind)
+    : "invoice";
+
+export const documentKindSpecFor = (
+  value: string | null | undefined
+): DocumentKindSpec => DOCUMENT_KIND_SPECS[resolveDocumentKind(value)];
+
+/** §34: a credit note reduces the supplier's liability, a debit note raises it. */
+export const isCreditOrDebitNote = (
+  value: string | null | undefined
+): boolean => {
+  const kind = resolveDocumentKind(value);
+  return kind === "credit_note" || kind === "debit_note";
+};
+
+export interface DocumentIdentity {
+  documentKind?: string | null;
+  /** Derived from `taxTreatment`; absent on a pre-Phase-2 record. */
+  documentType?: DocumentType;
+  /** ABSENT means pre-Phase-2. Used only to re-derive a missing `documentType`. */
+  taxTreatment?: TaxTreatment;
+}
+
+/**
+ * The one printed heading, for all four renderers.
+ *
+ * A pre-Phase-2 record has neither field and keeps the plain "INVOICE" it has
+ * always printed — re-printing a document a client already holds must not
+ * change its heading.
+ */
+export const documentTitleFor = (source: DocumentIdentity): string => {
+  const spec = documentKindSpecFor(source.documentKind);
+  if (spec.title) {
+    return spec.title;
+  }
+  const documentType =
+    source.documentType ??
+    (source.taxTreatment ? documentTypeFor(source.taxTreatment) : "invoice");
+  return DOCUMENT_TITLES[documentType] ?? DOCUMENT_TITLES.invoice;
+};
+
+/**
+ * The tax language a non-invoice document MUST carry, or null.
+ *
+ * A proforma is not a GST document at all: it creates no liability, carries no
+ * input tax credit, and must say so. What it must say depends on the supplier's
+ * registration — telling an unregistered freelancer's client that "GST will be
+ * charged on the tax invoice" is a claim §32 forbids them from making, and
+ * telling a composition dealer's client to expect a tax invoice is wrong in the
+ * other direction (they will receive a bill of supply).
+ *
+ * A credit or debit note from a REGISTERED supplier is a §34 document and needs
+ * no disclaimer. From anyone else it adjusts nothing for GST, and says so.
+ */
+export const documentTaxNoticeFor = (source: DocumentIdentity): string | null => {
+  const kind = resolveDocumentKind(source.documentKind);
+  const treatment = source.taxTreatment;
+
+  if (kind === "credit_note" || kind === "debit_note") {
+    if (treatment === "gst") {
+      return null;
+    }
+    const noun = kind === "credit_note" ? "credit note" : "debit note";
+    return `This is a commercial ${noun}. It adjusts no GST and carries no input tax credit.`;
+  }
+
+  if (kind !== "proforma" && kind !== "quotation") {
+    return null;
+  }
+
+  const noun = kind === "quotation" ? "quotation" : "proforma invoice";
+  if (treatment === "gst") {
+    return `This is not a tax invoice. No tax has been charged on this ${noun} and no input tax credit may be claimed against it; GST shown is indicative and will be charged on the tax invoice.`;
+  }
+  if (treatment === "composition") {
+    return `This is not a tax invoice or a bill of supply. Tax is not collected on this ${noun}; a bill of supply will be issued when the supply is made.`;
+  }
+  return `This is not a tax invoice. No tax has been charged on this ${noun} and it creates no tax liability.`;
+};
+
+/**
+ * "30 November 2027" — the last date a credit note against an invoice dated in
+ * `originalInvoiceDate`'s financial year can still be DECLARED in a return and
+ * actually reduce the supplier's output tax liability (§34(2), as amended by
+ * the Finance Act 2022; or the annual return for that year, whichever is
+ * earlier).
+ *
+ * There is NO time limit on issuing one — only on declaring it — so this is
+ * surfaced as a warning and never as a block. Returns null when the date cannot
+ * be read, rather than guessing a deadline onto a legal document.
+ */
+export const creditNoteDeclarationDeadline = (
+  originalInvoiceDate: string | Date | undefined
+): string | null => {
+  if (!originalInvoiceDate) {
+    return null;
+  }
+  const financialYear = deriveFinancialYear(originalInvoiceDate);
+  if (!isFinancialYear(financialYear)) {
+    return null;
+  }
+  // FY 2026-27 ends 31 March 2027, so "the 30 November following the end of the
+  // financial year" is 30 November 2027 — the START year plus one.
+  return `30 November ${Number(financialYear.slice(0, 4)) + 1}`;
+};
 
 /* -------------------------------------------------------------------------- */
 /* TDS (item 7.3)                                                              */
@@ -198,6 +496,13 @@ export interface TotalsInput {
    * It never enters the money formula — see `buildTotalsRows`.
    */
   tds?: { section?: TdsSection; ratePercent?: number };
+  /**
+   * WHAT the document is. It changes no arithmetic — see the note on
+   * `grandTotalLabel` — only the name of the grand-total row, which rides out
+   * inside `InvoiceTotals` so all four renderers pick it up with no call-site
+   * edit. Absent means "invoice".
+   */
+  documentKind?: InvoiceDocumentKind;
 }
 
 export interface ComputedLine {
@@ -249,6 +554,23 @@ export interface InvoiceTotals {
    * up from `buildTotalsRows` with no call-site edit.
    */
   tds: TdsInfo | null;
+  /**
+   * What the grand-total row is CALLED. "Total" for an invoice, "Total
+   * Credited" for a credit note, "Total Debited" for a debit note.
+   *
+   * A LABEL, not a sign — and that is the whole design decision for §34. A
+   * credit note flows through `computeTotals` unchanged: every amount on it is
+   * a positive magnitude ("value of supply, rate and amount of tax credited",
+   * Rule 53(1A)), and the direction is a property of the DOCUMENT, not of the
+   * arithmetic. Negating the total here would give the formula a second
+   * meaning, defeat the `Math.max(0, …)` clamp that stops a discount producing
+   * a nonsense total, and put a minus sign on a printed credit note that no
+   * accountant expects to see there.
+   *
+   * Optional so that hand-built `InvoiceTotals` literals keep compiling;
+   * `computeTotals` always sets it and `buildTotalsRows` falls back to "Total".
+   */
+  grandTotalLabel?: string;
 }
 
 const ZERO_LINE_TAX: LineTax = { cgst: 0, sgst: 0, igst: 0 };
@@ -551,6 +873,7 @@ export const computeTotals = (input: TotalsInput): InvoiceTotals => {
     total,
     suppressedBecause,
     tds,
+    grandTotalLabel: documentKindSpecFor(input.documentKind).grandTotalLabel,
   };
 };
 
@@ -649,6 +972,7 @@ export const resolveRecordAmounts = (invoice: InvoiceRecord): InvoiceTotals => {
     currency: invoice.currency,
     tax: taxContextForRecord(invoice),
     tds: { section: invoice.tdsSection, ratePercent: invoice.tdsRatePercent },
+    documentKind: invoice.documentKind,
   });
 
   return {
@@ -719,7 +1043,11 @@ export const buildTotalsRows = (amounts: InvoiceTotals): TotalsRow[] => {
     rows.push({ label: "Round Off", amount: amounts.roundOff, kind: "line" });
   }
 
-  rows.push({ label: "Total", amount: amounts.total, kind: "grand" });
+  rows.push({
+    label: amounts.grandTotalLabel ?? "Total",
+    amount: amounts.total,
+    kind: "grand",
+  });
 
   // Both rows sit AFTER Total, and Total is untouched: the legal value of the
   // invoice is what the supply is worth, and TDS is the client's obligation to
@@ -909,6 +1237,14 @@ export interface ValidatableInvoice {
   withPaymentOfTax?: boolean;
   lutArn?: string;
   countryOfDestination?: string;
+  /** Absent means "invoice" — see `resolveDocumentKind`. */
+  documentKind?: InvoiceDocumentKind;
+  /** Rule 53(1A). Required on a credit or debit note, forbidden on anything else. */
+  originalInvoice?: {
+    invoiceId?: string;
+    invoiceNumber?: string;
+    invoiceDate?: string;
+  };
   /** The computed heads, used only as a tripwire on the derivation itself. */
   totals?: { cgst: number; sgst: number; igst: number };
 }
@@ -928,6 +1264,20 @@ export interface InvoiceValidation {
  */
 export const UNKNOWN_GST_RATE_ERROR =
   "That isn't a GST rate. Use 0%, 0.25%, 3%, 5%, 18% or 40%.";
+
+/**
+ * Rule 53(1A) wordings, as CONSTANTS for the same reason as
+ * `UNKNOWN_GST_RATE_ERROR`: `lib/invoice-field-validation.ts` looks its repair
+ * specs up by the validator's exact message, so interpolating "credit"/"debit"
+ * would make each rule two strings and lose the lookup. One sentence covers
+ * both kinds — they share the rule and they share the fix.
+ */
+export const NOTE_WITHOUT_ORIGINAL_ERROR =
+  "A credit or debit note must name the invoice it corrects.";
+export const NOTE_ORIGINAL_DATE_ERROR =
+  "The date of the invoice this note corrects is invalid.";
+export const NOTE_BEFORE_ORIGINAL_ERROR =
+  "A credit or debit note cannot be dated before the invoice it corrects.";
 
 const isValidDate = (value: string): boolean =>
   Boolean(value) && !Number.isNaN(new Date(value).getTime());
@@ -985,6 +1335,37 @@ export const validateInvoiceDetailed = (
   );
   if (!hasLineItem) {
     return fail("At least one line item is required");
+  }
+
+  /**
+   * §34 + Rule 53(1A): a credit or debit note is DEFINED by the invoice it
+   * corrects, and the original's serial number and date are mandatory
+   * particulars. A note without them is not a defective document, it is a
+   * different (and unusable) one — so this blocks rather than warns.
+   *
+   * The reference itself is proved server-side, where the invoice can actually
+   * be looked up under the caller's own uid; this rule is about the document
+   * being complete, and it runs identically in the editor and in the API.
+   */
+  const documentKind = resolveDocumentKind(invoice.documentKind);
+  if (documentKind === "credit_note" || documentKind === "debit_note") {
+    const original = invoice.originalInvoice;
+    if (isBlank(original?.invoiceNumber)) {
+      return fail(NOTE_WITHOUT_ORIGINAL_ERROR);
+    }
+    if (!isValidDate(original?.invoiceDate ?? "")) {
+      return fail(NOTE_ORIGINAL_DATE_ERROR);
+    }
+    // A note that predates the supply it adjusts cannot be what it claims to
+    // be. Compared as civil dates: both sides round-trip through
+    // `yyyy-mm-dd`, so a same-day note passes.
+    if (
+      isValidDate(invoice.invoiceDate) &&
+      new Date(invoice.invoiceDate).getTime() <
+        new Date(original!.invoiceDate as string).getTime()
+    ) {
+      return fail(NOTE_BEFORE_ORIGINAL_ERROR);
+    }
   }
 
   // GSTINs. ABSENCE IS VALID and must stay valid: registration starts at ₹20
@@ -1133,6 +1514,23 @@ export const validateInvoiceDetailed = (
     }
     if (supplyKind === "intra" && invoice.totals.igst > 0) {
       return fail("An intra-State supply must be taxed as CGST/SGST, not IGST.");
+    }
+  }
+
+  /**
+   * §34(2)'s declaration deadline. A WARNING, never a block: there is no time
+   * limit on ISSUING a credit note, only on declaring it in a return, and a
+   * user correcting an old invoice for commercial reasons is entitled to do so
+   * long after the adjustment stops being available.
+   */
+  if (documentKind === "credit_note" && treatment === "gst") {
+    const deadline = creditNoteDeclarationDeadline(
+      invoice.originalInvoice?.invoiceDate
+    );
+    if (deadline) {
+      warnings.push(
+        `Declare this credit note in a return by ${deadline} to reduce your GST liability. After that it adjusts nothing for GST.`
+      );
     }
   }
 

@@ -17,6 +17,8 @@ export interface UseInvoiceDraftOptions {
   userId: string;
   mode: InvoiceDraftMode;
   invoiceId?: string;
+  /** Create mode: keeps a proforma draft out of the invoice draft's slot. */
+  documentKind?: string;
   /** The live form state. */
   state: InvoiceFormState;
   /**
@@ -74,12 +76,13 @@ export function useInvoiceDraft({
   userId,
   mode,
   invoiceId,
+  documentKind,
   state,
   isDirty,
   enabled = true,
   debounceMs = DEFAULT_DEBOUNCE_MS,
 }: UseInvoiceDraftOptions): UseInvoiceDraftResult {
-  const key = invoiceDraftKey({ userId, mode, invoiceId });
+  const key = invoiceDraftKey({ userId, mode, invoiceId, documentKind });
   const [pendingDraft, setPendingDraft] = useState<RestorableDraft | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const stateRef = useRef(state);

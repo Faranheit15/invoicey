@@ -227,6 +227,18 @@ export default function PrivacyPage() {
               says otherwise, assume the free-tier terms apply.
             </p>
             <p>
+              The assistant can also work from text you paste into it — a
+              client&apos;s email, a WhatsApp message, a scope note — and extract
+              the invoice from that.{" "}
+              <strong className="font-semibold text-slate-900 dark:text-white">
+                Whatever you paste is sent to Google too
+              </strong>
+              , including anything personal about the sender that happens to be
+              in it, such as a signature block, a phone number or an unrelated
+              paragraph further down the thread. Paste the part you need rather
+              than the whole message.
+            </p>
+            <p>
               This is the single most important thing on this page, which is why
               it is not buried: if you do not want your clients&apos; names and
               addresses reaching Google, do not use the AI assistant. Everything

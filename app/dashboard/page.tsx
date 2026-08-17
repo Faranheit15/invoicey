@@ -50,6 +50,10 @@ import {
   formatCurrency,
   formatDateLong,
 } from "@/lib/invoices";
+import {
+  documentKindSpecFor,
+  resolveDocumentKind,
+} from "@/lib/invoice-domain";
 
 const DASHBOARD_AUTH_PATH = "/auth?next=%2Fdashboard";
 import { PlusIcon, ReloadIcon } from "@radix-ui/react-icons";
@@ -303,6 +307,28 @@ export default function DashboardPage() {
     [router]
   );
 
+  /**
+   * §34's correction path. Same shape as duplicate and for the same reasons:
+   * the editor loads the invoice, pre-fills a note against it and waits for the
+   * user to save. Nothing is written from here, and no number is burnt.
+   */
+  const createNote = useCallback(
+    (invoiceId: string, kind: "credit_note" | "debit_note") => {
+      router.push(
+        `/create-invoice?${kind}=${encodeURIComponent(invoiceId)}`
+      );
+    },
+    [router]
+  );
+
+  /** Accepted proforma -> invoice, with a fresh number out of the invoice series. */
+  const convertToInvoice = useCallback(
+    (invoiceId: string) => {
+      router.push(`/create-invoice?convert=${encodeURIComponent(invoiceId)}`);
+    },
+    [router]
+  );
+
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
     if (hour < 12) {
@@ -317,10 +343,22 @@ export default function DashboardPage() {
   // Computed over `summaryInvoices` — the whole account — NOT over the table's
   // current page, so paging or filtering never moves these numbers.
   const summary = useMemo(() => {
-    const paid = summaryInvoices.filter(
+    /**
+     * INVOICES ONLY. A proforma is a quote, not revenue, and a credit note is a
+     * reduction of an invoice already counted — summing either into "Collected
+     * Revenue" or "Total Invoices" would overstate the account by the amount of
+     * money the user has explicitly NOT been paid.
+     *
+     * Non-invoice documents stay in the LIST below (the user has to be able to
+     * find their proformas), just not in these three figures.
+     */
+    const summaryInvoicesOnly = summaryInvoices.filter(
+      (invoice) => resolveDocumentKind(invoice.documentKind) === "invoice"
+    );
+    const paid = summaryInvoicesOnly.filter(
       (invoice) => resolveDisplayStatus(invoice) === "paid"
     );
-    const outstanding = summaryInvoices.filter((invoice) => {
+    const outstanding = summaryInvoicesOnly.filter((invoice) => {
       const status = resolveDisplayStatus(invoice);
       return status === "sent" || status === "overdue";
     });
@@ -337,7 +375,7 @@ export default function DashboardPage() {
         return acc;
       }, {});
 
-    const counts = summaryInvoices.reduce<Record<string, number>>((acc, invoice) => {
+    const counts = summaryInvoicesOnly.reduce<Record<string, number>>((acc, invoice) => {
       const code = invoice.currency || "INR";
       acc[code] = (acc[code] || 0) + 1;
       return acc;
@@ -351,7 +389,7 @@ export default function DashboardPage() {
     const pendingByCurrency = sumByCurrency(outstanding);
 
     return {
-      count: summaryInvoices.length,
+      count: summaryInvoicesOnly.length,
       totalRevenue: revenueByCurrency[primaryCurrency] || 0,
       pendingAmount: pendingByCurrency[primaryCurrency] || 0,
       currency: primaryCurrency,
@@ -372,10 +410,27 @@ export default function DashboardPage() {
               Manage, review, edit, and export all your invoices from one place.
             </p>
           </div>
-          <Button onClick={() => router.push("/create-invoice")}>
-            <PlusIcon className="w-4 h-4" />
-            New Invoice
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Secondary on purpose: the invoice is the product, and these are
+                the documents that lead to one. Each opens the same editor in
+                its own numbering series. */}
+            <Button
+              variant="outline"
+              onClick={() => router.push("/create-invoice?kind=quotation")}
+            >
+              New quotation
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => router.push("/create-invoice?kind=proforma")}
+            >
+              New proforma
+            </Button>
+            <Button onClick={() => router.push("/create-invoice")}>
+              <PlusIcon className="w-4 h-4" />
+              New Invoice
+            </Button>
+          </div>
         </section>
 
         <section className="grid gap-4 md:grid-cols-3">
@@ -524,6 +579,16 @@ export default function DashboardPage() {
                       <TableRow key={invoice._id}>
                         <TableCell className="max-w-[180px] truncate font-medium text-slate-800 dark:text-slate-100">
                           {invoice.invoiceNumber}
+                          {/* Named only when it is NOT an ordinary invoice: a
+                              badge on every row is noise, and a proforma
+                              sitting unlabelled among invoices is a document
+                              someone can mistake for one. */}
+                          {resolveDocumentKind(invoice.documentKind) !==
+                          "invoice" ? (
+                            <span className="ml-2 rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:border-slate-600 dark:text-slate-400">
+                              {documentKindSpecFor(invoice.documentKind).noun}
+                            </span>
+                          ) : null}
                         </TableCell>
                         <TableCell
                           className="max-w-[220px] truncate text-slate-600 dark:text-slate-300"
@@ -651,6 +716,14 @@ export default function DashboardPage() {
           onDuplicate={(id) => {
             setSelectedInvoice(null);
             duplicateInvoice(id);
+          }}
+          onCreateNote={(id, kind) => {
+            setSelectedInvoice(null);
+            createNote(id, kind);
+          }}
+          onConvert={(id) => {
+            setSelectedInvoice(null);
+            convertToInvoice(id);
           }}
         />
       ) : null}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser, authErrorResponse } from "@/lib/server/auth";
 import {
   DRAFT_TOO_LARGE_MESSAGE,
+  PASTED_TEXT_TOO_LARGE_MESSAGE,
   generateInvoiceAssistantResponse,
   validateAssistantRequest,
 } from "@/lib/ai/invoice-assistant/service";
@@ -38,7 +39,8 @@ const isClientError = (message: string) => {
   return (
     message.includes("Please enter a message") ||
     message.includes("Invoice draft context is required") ||
-    message.includes(DRAFT_TOO_LARGE_MESSAGE)
+    message.includes(DRAFT_TOO_LARGE_MESSAGE) ||
+    message.includes(PASTED_TEXT_TOO_LARGE_MESSAGE)
   );
 };
 
@@ -172,6 +174,9 @@ export async function POST(req: NextRequest) {
         fullPrompt: telemetry.userPrompt,
         conversationLen: request.conversation.length,
         promptChars: telemetry.userPrompt.length,
+        // Which input path the turn came from, so the extraction/generation
+        // split is measurable rather than assumed.
+        source: request.source,
       },
     });
     logEvent({

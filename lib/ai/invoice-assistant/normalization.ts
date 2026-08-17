@@ -19,6 +19,11 @@ import {
   isValidInvoiceNumber,
   normalizeInvoiceNumber,
 } from "@/lib/invoice-number";
+import {
+  MAX_ITEM_QUANTITY,
+  MAX_ITEM_UNIT_PRICE,
+  MAX_MONEY_VALUE,
+} from "@/lib/invoice-domain";
 import type {
   InvoiceAssistantPatch,
   InvoiceAssistantResponse,
@@ -93,12 +98,32 @@ const normalizeDateInput = (value: unknown): string | undefined => {
   return toDateInputValue(parsedDate);
 };
 
-const toNonNegativeNumber = (value: unknown): number | undefined => {
+/**
+ * A money amount, DROPPED rather than clamped when it exceeds the ceiling.
+ *
+ * The floor is a clamp — a negative is unambiguously a sign error and 0 is the
+ * only sane reading. The ceiling is not, and the difference matters more now
+ * that the input can be a pasted blob: extraction reads amounts out of someone
+ * else's prose, where "2,50,000" and "2.5L" and a stray "9999999999999" in a
+ * phone number all look like numbers. Clamping a runaway to
+ * `MAX_ITEM_UNIT_PRICE` would put ₹10,00,00,000 on an invoice and call it the
+ * user's intent; dropping it leaves the field empty, where they will see it.
+ * `mapFormStateToPayload` and the API clamp too, but by then the number is
+ * already in front of the user as if they had typed it.
+ */
+const toNonNegativeNumber = (
+  value: unknown,
+  limit: number = MAX_MONEY_VALUE
+): number | undefined => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     return undefined;
   }
-  return Math.max(0, Number(parsed.toFixed(2)));
+  const rounded = Number(parsed.toFixed(2));
+  if (rounded > limit) {
+    return undefined;
+  }
+  return Math.max(0, rounded);
 };
 
 const toQuantity = (value: unknown): number | undefined => {
@@ -106,7 +131,11 @@ const toQuantity = (value: unknown): number | undefined => {
   if (!Number.isFinite(parsed)) {
     return undefined;
   }
-  return Math.max(1, Number(parsed.toFixed(2)));
+  const rounded = Number(parsed.toFixed(2));
+  if (rounded > MAX_ITEM_QUANTITY) {
+    return undefined;
+  }
+  return Math.max(1, rounded);
 };
 
 /**
@@ -175,7 +204,10 @@ const normalizeItems = (value: unknown): InvoiceFormItem[] | undefined => {
       const itemObject = item as Record<string, unknown>;
       const description = toTrimmedString(itemObject.description).slice(0, 250);
       const quantity = toQuantity(itemObject.quantity);
-      const unitPrice = toNonNegativeNumber(itemObject.unitPrice);
+      const unitPrice = toNonNegativeNumber(
+        itemObject.unitPrice,
+        MAX_ITEM_UNIT_PRICE
+      );
 
       if (!description || quantity === undefined || unitPrice === undefined) {
         return null;

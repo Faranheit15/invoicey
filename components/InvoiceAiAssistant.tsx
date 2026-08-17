@@ -13,6 +13,7 @@ import type {
 import type { InvoiceFormState } from "@/lib/invoices";
 import {
   ChatBubbleIcon,
+  ClipboardIcon,
   LightningBoltIcon,
   MagicWandIcon,
   PaperPlaneIcon,
@@ -25,8 +26,28 @@ const QUICK_PROMPTS = [
   "UI audit for Nova Health, 12 hours at 85 EUR/hour, invoice date today, due in 14 days.",
 ];
 
+/**
+ * Two ways in, and the second one is the smaller ask.
+ *
+ * "Describe" wants the user to COMPOSE a sentence about work they have already
+ * done. "Paste" wants them to COPY the mail the client already sent. Copying is
+ * a much smaller thing to ask of someone at the end of a billing cycle, and it
+ * is the one AI capability this market asked for out loud.
+ *
+ * Both paths hit the same endpoint, the same normalizer and the same review
+ * step — the assistant still writes nothing but in-memory form state.
+ */
+const SAMPLE_PASTES = [
+  `Hi, please raise the invoice for the March work — 18 hours of backend consulting at Rs 2,500/hr plus the one-time setup of Rs 8,000. GST 18%. We're in Bengaluru. Payment in 15 days as usual.\n\nThanks,\nPriya`,
+  "Bhai invoice bana do — Sharma Traders ke liye, logo design ka 25 hazaar, aur website ka 40 hazaar. 18% GST lagana. Payment 30 din me.",
+];
+
 const MAX_CONVERSATION_ENTRIES = 12;
 const MAX_PROMPT_LENGTH = 4000;
+/** Mirrors MAX_PASTED_TEXT_LENGTH in lib/ai/invoice-assistant/service.ts. */
+const MAX_PASTE_LENGTH = 8000;
+
+type AssistantInputMode = "describe" | "paste";
 
 interface InvoiceAiAssistantProps {
   invoice: InvoiceFormState;
@@ -39,6 +60,7 @@ export default function InvoiceAiAssistant({
   getAuthToken,
   onApplyPatch,
 }: InvoiceAiAssistantProps) {
+  const [inputMode, setInputMode] = useState<AssistantInputMode>("describe");
   const [prompt, setPrompt] = useState("");
   const [conversation, setConversation] = useState<AssistantConversationEntry[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -51,10 +73,19 @@ export default function InvoiceAiAssistant({
   const [appliedFields, setAppliedFields] = useState<string[]>([]);
 
   const promptLength = useMemo(() => prompt.trim().length, [prompt]);
+  const isPasteMode = inputMode === "paste";
+  const maxLength = isPasteMode ? MAX_PASTE_LENGTH : MAX_PROMPT_LENGTH;
 
   const submitPrompt = async (value?: string) => {
     const message = (value || prompt).trim();
     if (!message || isGenerating) {
+      return;
+    }
+
+    if (message.length > maxLength) {
+      setAssistantError(
+        `That is ${message.length.toLocaleString()} characters. Trim it to about ${maxLength.toLocaleString()} — the part describing the work is usually enough.`
+      );
       return;
     }
 
@@ -89,8 +120,16 @@ export default function InvoiceAiAssistant({
         },
         body: JSON.stringify({
           message,
-          conversation: updatedConversation,
+          // PRIOR turns only. The prompt renders history and the latest message
+          // as separate sections, so sending `updatedConversation` here shipped
+          // this turn's text twice — invisible at 40 characters of description,
+          // an extra 4,000 characters of billed prompt when the turn is a
+          // pasted email.
+          conversation,
           draft: invoice,
+          // The server fences a paste as data and gives it its own size cap;
+          // it defaults to "prompt" if this is ever missing.
+          source: isPasteMode ? "paste" : "prompt",
         }),
         // The model call is slower than a normal request but must not hang.
         signal: AbortSignal.timeout(60_000),
@@ -153,29 +192,75 @@ export default function InvoiceAiAssistant({
           </span>
         </div>
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Describe your invoice in natural language and I&apos;ll fill the form below.
+          {isPasteMode
+            ? "Paste the client's email, WhatsApp message or scope note — Hindi and Hinglish are fine — and I'll pull the invoice out of it."
+            : "Describe your invoice in natural language and I'll fill the form below."}
         </p>
       </CardHeader>
 
       <CardContent className="relative space-y-4 p-5">
+        {/* Two inputs, one endpoint. The tab only changes what the user is
+            asked to supply — composed prose, or somebody else's text. */}
+        <div
+          role="tablist"
+          aria-label="Assistant input"
+          className="inline-flex rounded-lg border border-sky-200/80 bg-white/70 p-1 dark:border-sky-700/60 dark:bg-slate-900/60"
+        >
+          {(
+            [
+              { id: "describe", label: "Describe it", icon: MagicWandIcon },
+              { id: "paste", label: "Paste an email", icon: ClipboardIcon },
+            ] as const
+          ).map((tab) => {
+            const TabIcon = tab.icon;
+            const isActive = inputMode === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => {
+                  setInputMode(tab.id);
+                  setAssistantError("");
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                  isActive
+                    ? "bg-sky-600 text-white shadow-sm dark:bg-sky-500"
+                    : "text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+                }`}
+              >
+                <TabIcon className="h-3.5 w-3.5" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="grid gap-2">
           <label
             htmlFor="invoice-ai-prompt"
             className="text-xs font-semibold tracking-wide text-slate-600 dark:text-slate-300"
           >
-            Prompt
+            {isPasteMode ? "Pasted text" : "Prompt"}
           </label>
           <Textarea
             id="invoice-ai-prompt"
-            placeholder="Example: Web development for TechCorp, 40 hours at $120/hr, plus $500 for cloud hosting, due in 30 days, USD."
+            placeholder={
+              isPasteMode
+                ? "Paste the client's mail or message here. Example: “Please invoice 18 hours of backend consulting at Rs 2,500/hr plus Rs 8,000 setup, 18% GST, we're in Bengaluru, payment in 15 days.”"
+                : "Example: Web development for TechCorp, 40 hours at $120/hr, plus $500 for cloud hosting, due in 30 days, USD."
+            }
             value={prompt}
-            maxLength={MAX_PROMPT_LENGTH}
+            maxLength={maxLength}
             onChange={(event) => setPrompt(event.target.value)}
-            className="min-h-[112px] border-sky-200/80 bg-white/85 text-slate-800 shadow-sm focus-visible:ring-sky-500 dark:border-sky-700/60 dark:bg-slate-900/70 dark:text-slate-100"
+            className={`border-sky-200/80 bg-white/85 text-slate-800 shadow-sm focus-visible:ring-sky-500 dark:border-sky-700/60 dark:bg-slate-900/70 dark:text-slate-100 ${
+              isPasteMode ? "min-h-[184px]" : "min-h-[112px]"
+            }`}
           />
           <div className="flex items-center justify-between">
             <span className="text-xs text-slate-500 dark:text-slate-400">
-              {promptLength}/{MAX_PROMPT_LENGTH}
+              {promptLength}/{maxLength}
             </span>
             <Button
               type="button"
@@ -186,35 +271,47 @@ export default function InvoiceAiAssistant({
               {isGenerating ? (
                 <>
                   <ReloadIcon className="h-4 w-4 animate-spin" />
-                  Generating…
+                  {isPasteMode ? "Reading…" : "Generating…"}
                 </>
               ) : (
                 <>
                   <PaperPlaneIcon className="h-4 w-4" />
-                  Fill Invoice
+                  {isPasteMode ? "Extract Invoice" : "Fill Invoice"}
                 </>
               )}
             </Button>
           </div>
+          {isPasteMode ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Nothing is saved until you review the form and press Create
+              Invoice.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {QUICK_PROMPTS.map((quickPrompt, index) => (
-            <button
-              key={`quick-prompt-${index}`}
-              type="button"
-              disabled={isGenerating}
-              onClick={() => submitPrompt(quickPrompt)}
-              className="rounded-full border border-sky-200 bg-white/85 px-3 py-1.5 text-left text-xs text-slate-700 transition hover:border-sky-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-700/60 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:border-sky-500"
-            >
-              {quickPrompt}
-            </button>
-          ))}
+          {(isPasteMode ? SAMPLE_PASTES : QUICK_PROMPTS).map(
+            (example, index) => (
+              <button
+                key={`example-${inputMode}-${index}`}
+                type="button"
+                disabled={isGenerating}
+                onClick={() => submitPrompt(example)}
+                className="max-w-full rounded-full border border-sky-200 bg-white/85 px-3 py-1.5 text-left text-xs text-slate-700 transition hover:border-sky-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-700/60 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:border-sky-500"
+              >
+                <span className="line-clamp-2">
+                  {isPasteMode ? `Try: ${example}` : example}
+                </span>
+              </button>
+            )
+          )}
         </div>
 
         <LiveStatus>
           {isGenerating
-            ? "Reading your description…"
+            ? isPasteMode
+              ? "Reading the pasted text…"
+              : "Reading your description…"
             : appliedFields.length
               ? `Filled ${appliedFields.length} field${appliedFields.length > 1 ? "s" : ""}.`
               : ""}
