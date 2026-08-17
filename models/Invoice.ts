@@ -124,6 +124,18 @@ export interface IInvoice extends Document {
   countryOfDestination?: string;
 }
 
+/**
+ * ADDING A FIELD HERE IS ALSO A CHANGE TO THE DPDP EXPORT.
+ *
+ * `lib/server/account-export.ts` allow-lists every field it ships (a spread
+ * would post pre-migration Firebase tokens back over HTTP), which means it goes
+ * stale every time this schema grows — it did exactly that across Phases 2 and
+ * 4, and the export silently stopped containing GSTINs, HSN codes, IGST and the
+ * credit-note reference while still telling users it was their complete record.
+ * `tests/account-export-schema.test.ts` now reads the schema paths below and
+ * fails unless each one is either exported or named as deliberately withheld.
+ * So: add the field here, then decide there. The test will insist.
+ */
 const InvoiceSchema: Schema = new Schema({
   // Tenant owner. The non-empty validator stops any future write from creating
   // an orphan (tenant-less) row. NOTE: true isolation is still application-

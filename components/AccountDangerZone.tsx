@@ -178,9 +178,11 @@ export function AccountDangerZone({
         <CardContent className="space-y-4">
           <p className="max-w-[68ch] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
             This deletes your account, every invoice you have ever created here
-            — including the ones you already deleted — and your feedback. It is
-            permanent. There is no recycle bin for this, no grace period, and no
-            way for us to bring any of it back.
+            — including the ones you already deleted — your saved business
+            details (GSTIN, PAN, address, bank account, IFSC, UPI ID and
+            signature) and your feedback. It is permanent. There is no recycle
+            bin for this, no grace period, and no way for us to bring any of it
+            back.
           </p>
           <p className="max-w-[68ch] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
             Download your data first. It takes one click and it is the only copy

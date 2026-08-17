@@ -44,8 +44,10 @@ findings, all fixed before the commit.
 - [ ] Run `bun run migrate:purge-tokens`, then rotate DB backups and revoke
       Firebase refresh tokens
 - [ ] Run `bun run migrate:invoice-numbering`, resolve any duplicates it reports
-      BY HAND, then create `uniq_user_fy_invoice_number` in the background. The
-      unique index cannot build until the backfill has run.
+      BY HAND, then create `uniq_user_fy_kind_invoice_number` in the background.
+      The unique index cannot build until the backfill has run — and since
+      `connectDB` sets `autoIndex: false`, nothing but this step will create it
+      (or any other index). See owner action 1 at the bottom for the full list.
 - [!] Google Cloud budget alert
 - [!] Paid Gemini key — free-tier prompts train Google's models, and the prompt
       carries the user's clients' names, addresses and amounts
@@ -202,7 +204,12 @@ index in the background, off-hours.
 - [x] Client memory
 - [x] Duplicate invoice
 - [x] Dashboard search / filter / sort / pagination
-- [x] Derived overdue + aging buckets
+- [x] Derived overdue + aging buckets — the derived-overdue half shipped and is
+      on screen; the **aging half was tested and had no caller at all** until the
+      launch-blocker pass, so the product computed a receivables ladder nobody
+      could see. Now rendered as "Outstanding by age" on the dashboard
+      (`components/dashboard/aging-summary.tsx`), invoices-only and
+      single-currency like the summary cards above it.
 - [x] UPI QR + structured bank block
 - [x] `wa.me` share + `navigator.share`
 - [x] Unsaved-changes guard + localStorage draft
@@ -224,6 +231,54 @@ index in the background, off-hours.
       `localStorage.clear()`; now explicit, because it holds the client's name,
       address and amounts.
 
+## Launch-blocker pass — the export claimed to be complete and was not
+
+- [x] **`GET /api/account/export` never read `BusinessProfile`.** The DPDP
+      export omitted the entire seller record — GSTIN, PAN, address, bank
+      account, IFSC, UPI VPA, signature — while `DELETE /api/account` already
+      `deleteMany`-ed it. A GST-registered user who followed the delete flow's
+      own "download my data first" gate lost all of it permanently, having been
+      told in the same file to retain their records for 72 months.
+- [x] **`buildExportedInvoice` was a Phase-1 allow-list that had rotted.** It
+      silently dropped everything Phases 2 and 4 added: both GSTINs, PAN, IGST,
+      taxable value, round-off, the TDS block, the signature block, place of
+      supply, the export declaration, `documentKind` and `originalInvoice` (so
+      credit notes were indistinguishable from the invoices they correct), and
+      every per-line `hsnSac` / `unit` / `discount` / `taxRatePercent` /
+      `taxableValue` / `cgstAmount` / `sgstAmount` / `igstAmount`.
+- [x] **The rot is now a build failure.** `tests/account-export-schema.test.ts`
+      reads the Mongoose schema paths out of `models/Invoice.ts` and
+      `models/BusinessProfile.ts` in a clean subprocess (Bun's `mock.module` is
+      process-global, so importing the model in-suite would hand it a fake) and
+      fails unless every path is either exported or named in the module's
+      `*_FIELDS_WITHHELD` list with a reason. Adding a field to either model
+      breaks the suite until someone decides whether the user gets it. The
+      expected set is DERIVED, never hand-listed — a hand-listed one drifts the
+      same way the allow-list did.
+- [x] It is still an ALLOW-LIST, never a spread: the pre-migration
+      `accessToken` / `refreshToken` leak test is unchanged and still passing,
+      and the guard also fails on an exported key the schema does not have.
+- [x] Export shape version bumped to 2; `/account` and `/privacy` corrected to
+      match what the file now contains.
+- [x] **`connectDB` now passes `autoIndex: false`.** Mongoose defaults it to
+      true, so the first request after a cold start foreground-built the FULL
+      unique `uniq_user_fy_kind_invoice_number` index — on a collection that may
+      still hold the duplicates `migrate:invoice-numbering` exists to REPORT —
+      and swallowed the failure. Index creation is now entirely the owner's,
+      off-hours, after the migration. See the owner action below.
+- [x] **The AI paste fence could be closed from inside.** `cleanPastedText` did
+      not neutralise `PASTED_TEXT>>>`, so a client's email could end the fence
+      and continue as if it were the operator — and the prize was `paymentInfo`,
+      the printed bank block. Both sentinels (and the bare token) are now
+      stripped from pasted text, and `paymentInfo` is dropped from the patch
+      entirely on the paste path: there is no reading of a client email in which
+      the client legitimately supplies the payee's bank details. The composed
+      path is unchanged, because there the user is describing their own invoice.
+- [x] `/privacy` now discloses the localStorage invoice draft (client name,
+      address, line items and amounts, kept up to seven days on the user's own
+      device) and the business profile, in both "What we collect" and the
+      retention list.
+
 ## Phase 4 — Strategic bets
 
 - [ ] Anonymous first invoice — **not built.** It is the one Phase 4 bet that
@@ -240,12 +295,32 @@ index in the background, off-hours.
 
 Nothing below can be done from inside the repository.
 
-1. **Invoice numbering migration.** Run `bun run migrate:invoice-numbering`,
-   resolve the duplicates it reports, then **drop the old unique index before
-   creating the new one** — the old key would keep enforcing uniqueness across
-   document series. Build it off-hours. The migration reports rather than
-   renumbers, deliberately: the number is printed on a document the client
-   already holds.
+1. **Invoice numbering migration, and then EVERY index by hand.** Run
+   `bun run migrate:invoice-numbering`, resolve the duplicates it reports, then
+   **drop the old unique index before creating the new one** — the old key would
+   keep enforcing uniqueness across document series. Build it off-hours. The
+   migration reports rather than renumbers, deliberately: the number is printed
+   on a document the client already holds.
+
+   `connectDB` now sets `autoIndex: false`, so **the app no longer creates any
+   index on its own** and this step is the only thing that will. That is the
+   point — a foreground unique build fired by whichever request happened to be
+   first, on a collection with unresolved duplicates, failing into a swallowed
+   connection event, is not a deploy anyone controls. The indexes to create,
+   all declared in `models/*.ts`:
+
+   - `Invoice`: `{ userId, is_deleted, createdAt }`, `{ is_deleted, createdAt }`,
+     `{ is_deleted, status, currency }` (performance; a missing one degrades),
+     and `uniq_user_fy_kind_invoice_number` on
+     `{ userId, financialYear, documentKind, invoiceNumberKey }`, `unique: true`
+     (correctness — this is the Rule 46(b) guarantee).
+   - `BusinessProfile`: `{ userId }`, `unique: true`.
+   - `LogEntry`: its `expireAt` TTL index. Losing this breaks no query and
+     silently switches log retention off forever, which is why
+     `scripts/verify-backup.ts` checks for it.
+
+   Create them with `background: true`, off-hours, and re-run
+   `bun run backup:verify` afterwards.
 2. **Move off the free Gemini key.** `/privacy` currently states, accurately,
    that free-tier prompts may be used to improve Google's products — and the
    prompt carries the user's clients' names, addresses and amounts. Then update

@@ -123,6 +123,24 @@ export default function PrivacyPage() {
           </p>
           <p>
             <strong className="font-semibold text-slate-900 dark:text-white">
+              Your business details.
+            </strong>{" "}
+            If you save a business profile, we store what you put in it: your
+            business name, address, email, phone and logo URL, your GSTIN and
+            PAN, your state code, your LUT ARN, your invoice defaults, your
+            signature name and image URL, and{" "}
+            <strong className="font-semibold text-slate-900 dark:text-white">
+              the payment details you save for reuse — bank account name and
+              number, IFSC code, bank name and UPI ID
+            </strong>
+            . We store them exactly as typed and use them for one thing: filling
+            in your next invoice and drawing the payment block and UPI QR code
+            printed on it. We never verify them, never send money anywhere, and
+            never share them with anyone. Deleting your account destroys this
+            record outright — export first if you need it.
+          </p>
+          <p>
+            <strong className="font-semibold text-slate-900 dark:text-white">
               Feedback.
             </strong>{" "}
             If you send feedback, we store your message, an optional rating, the
@@ -167,8 +185,21 @@ export default function PrivacyPage() {
             basic profile in your browser&apos;s local storage, so you stay
             signed in. Firebase stores its own sign-in session in your browser.
             Your theme preference is stored locally under{" "}
-            <code>invoicey-theme</code>. We do not use advertising or tracking
-            cookies. We also run Vercel Analytics and Vercel Speed Insights on
+            <code>invoicey-theme</code>.{" "}
+            <strong className="font-semibold text-slate-900 dark:text-white">
+              The invoice you are editing is also saved to your browser&apos;s
+              local storage as you type
+            </strong>{" "}
+            (keys beginning <code>invoicey-draft:</code>), so a closed tab or a
+            dropped connection does not lose your work. That draft holds the
+            same content as the invoice itself — your client&apos;s name,
+            address and email, the line items and the amounts — it is unencrypted
+            on your own device, and it is kept for up to seven days before it is
+            discarded. It is stored under your user id, it is deleted when you
+            restore or discard it, and signing out or deleting your account
+            clears it. It never leaves your browser: it is not sent to us and it
+            is not a cookie. On a shared or public computer, sign out when you
+            are done. We do not use advertising or tracking cookies. We also run Vercel Analytics and Vercel Speed Insights on
             our pages to count page views and measure loading speed; these are
             cookieless and do not build a profile of you.
           </p>
@@ -267,7 +298,7 @@ export default function PrivacyPage() {
               ],
               [
                 "MongoDB, Inc. (Atlas)",
-                "Your account record, your invoices, your feedback and the technical logs",
+                "Your account record, your business profile, your invoices, your feedback and the technical logs",
                 <Placeholder key="atlas">[ATLAS REGION]</Placeholder>,
               ],
               [
@@ -316,9 +347,16 @@ export default function PrivacyPage() {
           <LegalList>
             <li>
               <strong className="font-semibold text-slate-900 dark:text-white">
-                Your account and invoices:
+                Your account, business profile and invoices:
               </strong>{" "}
               until you ask us to delete them.
+            </li>
+            <li>
+              <strong className="font-semibold text-slate-900 dark:text-white">
+                The invoice draft in your browser:
+              </strong>{" "}
+              up to seven days, then it is discarded on the next visit. It lives
+              on your device, not ours.
             </li>
             <li>
               <strong className="font-semibold text-slate-900 dark:text-white">
@@ -378,8 +416,11 @@ export default function PrivacyPage() {
                 See what we hold.
               </strong>{" "}
               Export your account from your account page in the app. You get one
-              file containing your profile, every invoice — including the ones
-              you have deleted — your feedback, and your recent activity records.
+              file containing your profile, your saved business details
+              (including your GSTIN, PAN and the bank and UPI details you saved
+              for reuse), every invoice with its line items and tax breakdown —
+              including the ones you have deleted — your feedback, and your
+              recent activity records.
               You can also export any individual invoice as PDF, HTML, CSV or
               JSON from the editor. If you cannot reach the app, email the
               Grievance Officer and we will send it to you within{" "}
@@ -400,8 +441,9 @@ export default function PrivacyPage() {
               Delete your account from your account page. We ask you to sign in
               again and type your email address first, because this one is not
               reversible. It destroys your invoices — including the ones you had
-              already deleted — and your feedback and your account record, and
-              removes your sign-in account from Firebase. Your technical log
+              already deleted — your saved business details (GSTIN, PAN, bank
+              and UPI details, signature), your feedback and your account
+              record, and removes your sign-in account from Firebase. Your technical log
               entries are not destroyed; instead everything identifying is
               emptied out of them — your user id, your IP address, your
               user-agent, and the message and context fields, which is what

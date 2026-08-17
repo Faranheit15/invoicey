@@ -129,16 +129,21 @@ export default function AccountPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="max-w-[68ch] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-              Your data is yours, in a file you can read: your profile, every
-              invoice you have created — including the ones you deleted — any
-              feedback you sent, and your account activity. No special software
-              to open it, no lock-in to get it. The activity list is a summary
-              rather than the raw technical logs, and very large accounts are
-              capped; if you need the rest, ask and we will send it.
+              Your data is yours, in a file you can read: your profile, your
+              saved business details (GSTIN, PAN, address, bank account, IFSC,
+              UPI ID and signature), every invoice you have created — with its
+              line items, HSN/SAC codes and tax breakdown, including the ones
+              you deleted — any feedback you sent, and your account activity. No
+              special software to open it, no lock-in to get it. The activity
+              list is a summary rather than the raw technical logs, and very
+              large accounts are capped; if you need the rest, ask and we will
+              send it.
             </p>
             <p className="max-w-[68ch] text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-              JSON is the complete record. CSV is a flat invoice list for
-              spreadsheets, so it carries the invoices and nothing else.
+              JSON is the complete record — every field of every invoice, and
+              your business details. CSV is a one-row-per-invoice summary for
+              spreadsheets: no line items, no business details, and only the
+              columns that fit a flat file.
             </p>
             {summary ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">

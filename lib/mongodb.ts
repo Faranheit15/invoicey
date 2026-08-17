@@ -57,6 +57,33 @@ const connectDB = async () => {
         // budget waiting on an unreachable primary or a half-open socket.
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 20000,
+        // INDEXES ARE THE OWNER'S TO BUILD, NOT THE APP'S.
+        //
+        // Mongoose defaults `autoIndex` to true, so the first request after a
+        // cold start fires `createIndex` for every index declared on every
+        // model it touches — including the FULL unique index
+        // `uniq_user_fy_kind_invoice_number` on a collection that may still
+        // contain the duplicates `bun run migrate:invoice-numbering` is
+        // supposed to REPORT for a human to resolve. That build is a
+        // foreground operation on the primary, its failure is swallowed
+        // (Mongoose emits it on the connection, which nothing here listens
+        // to), and it happens at whatever moment the first user hits the app.
+        //
+        // "Build it in the background, off-hours, after the migration" — which
+        // is what models/Invoice.ts and the launch runbook both instruct — is
+        // not a decision the owner can make while the app is racing them to
+        // it. So: no automatic index management. EVERY index this app relies
+        // on is now created by hand from the runbook (docs/LAUNCH-PROGRESS.md
+        // and docs/runbooks/backup-and-restore.md list them) — including the
+        // three query indexes, which are performance, not correctness, and a
+        // missing one degrades rather than breaks.
+        //
+        // `scripts/verify-backup.ts` already passes this same option for the
+        // same reason: with it on, the restore drill's index check rebuilt the
+        // indexes it was verifying and could never fail. The migrations go
+        // through this function too, so `migrate:invoice-numbering` no longer
+        // trips the very unique build it exists to prepare for.
+        autoIndex: false,
       })
       .then((connection) => {
         console.log("MongoDB connected");

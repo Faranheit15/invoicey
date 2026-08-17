@@ -20,6 +20,7 @@ import {
   InvoiceRowActions,
 } from "@/components/InvoiceList";
 import { InvoiceFilterBar } from "@/components/dashboard/invoice-filter-bar";
+import { AgingSummary } from "@/components/dashboard/aging-summary";
 import { Pagination } from "@/components/ui/pagination";
 import {
   STATUS_PILL_BASE,
@@ -483,6 +484,16 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         </section>
+
+        {/* The ageing ladder sits under the totals and above the list: it is
+            read after "how much is outstanding" and before "which invoice do I
+            chase". Same unpaginated account-wide read as the cards. */}
+        <AgingSummary
+          invoices={summaryInvoices}
+          currency={summary.currency}
+          otherCurrencyCount={summary.otherCurrencyCount}
+          isLoading={isSummaryLoading}
+        />
 
         <Card className="border-slate-200 dark:border-slate-700 dark:bg-slate-900">
           <CardHeader className="flex-row items-center justify-between border-b border-slate-200 pb-3 space-y-0 dark:border-slate-700">

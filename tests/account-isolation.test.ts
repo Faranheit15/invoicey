@@ -230,6 +230,25 @@ beforeEach(() => {
     { _id: "log-A", userId: A, at: new Date(), event: "invoice.created", ip: "203.0.113.9", meta: {} },
     { _id: "log-B", userId: "B", at: new Date(), event: "invoice.created", ip: "198.51.100.7", meta: {} },
   ];
+  // The seller side. It is hard-deleted by DELETE /api/account, so the export
+  // has to carry it or the "download your data first" gate is a trap.
+  Profiles.rows = [
+    {
+      _id: "bp-A",
+      userId: A,
+      companyGstin: "27AAPFU0939F1ZV",
+      companyPan: "AAPFU0939F",
+      bankAccountNumber: "50100123456789",
+      bankIfsc: "HDFC0000123",
+      upiVpa: "a@okhdfcbank",
+    },
+    {
+      _id: "bp-B",
+      userId: "B",
+      companyGstin: "29AAGCB1286Q1ZG",
+      bankAccountNumber: "99999999999999",
+    },
+  ];
   Invoices.findFilters.length = 0;
   Invoices.deleteFilters.length = 0;
   Feedbacks.deleteFilters.length = 0;
@@ -269,6 +288,25 @@ describe("GET /api/account/export — tenant isolation", () => {
       await exportGet(makeReq("http://x/api/account/export?userId=B"))
     );
     expect(body.invoices).toHaveLength(2);
+  });
+
+  it("includes the business profile the account delete destroys", async () => {
+    const body = await readJson(await exportGet(makeReq("http://x/api/account/export")));
+    expect(body.businessProfile).not.toBeNull();
+    expect(body.businessProfile.companyGstin).toBe("27AAPFU0939F1ZV");
+    expect(body.businessProfile.companyPan).toBe("AAPFU0939F");
+    expect(body.businessProfile.bankAccountNumber).toBe("50100123456789");
+    expect(body.businessProfile.bankIfsc).toBe("HDFC0000123");
+    expect(body.businessProfile.upiVpa).toBe("a@okhdfcbank");
+    // Scoped by the token's uid like every other read here.
+    expect(JSON.stringify(body)).not.toContain("99999999999999");
+  });
+
+  it("reports a null business profile rather than omitting the key", async () => {
+    Profiles.rows = [];
+    const body = await readJson(await exportGet(makeReq("http://x/api/account/export")));
+    expect(body).toHaveProperty("businessProfile");
+    expect(body.businessProfile).toBeNull();
   });
 
   it("does not ship the purged token fields the legacy user document still has", async () => {

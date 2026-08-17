@@ -528,8 +528,14 @@ export interface TaxRow {
 export interface InvoiceTotals {
   /** Σ gross — unchanged meaning, still PRE-discount. */
   subtotal: number;
-  /** The discount actually applied (per-line plus invoice-level). */
+  /** The discount actually applied (per-line plus invoice-level) — what prints. */
   discount: number;
+  /**
+   * The invoice-level portion alone. This is the one to STORE: line discounts
+   * live on the lines, so persisting the combined figure double-counts them on
+   * every subsequent read.
+   */
+  invoiceDiscount: number;
   /** Rule 46(j): the value tax is charged on, i.e. subtotal - discount. */
   taxableValue: number;
   lines: ComputedLine[];
@@ -703,9 +709,20 @@ export const computeTotals = (input: TotalsInput): InvoiceTotals => {
   const lineDiscountTotal = round2(
     lineDiscounts.reduce((sum, value) => sum + value, 0)
   );
-  const discount = round2(
-    lineDiscountTotal + (tax.mode === "legacy" ? enteredDiscount : appliedDiscount)
-  );
+  // Two different numbers, and conflating them corrupts documents.
+  //
+  // `discount` is what the Discount ROW PRINTS: every rupee taken off, whether
+  // it came from a line or from the invoice-level field. `invoiceDiscount` is
+  // the invoice-level INPUT alone — the value that must be stored, because the
+  // line discounts are already stored on the lines themselves.
+  //
+  // Persisting the printed figure into the input field made every re-save
+  // subtract the line discounts a second time: a 1000 line with a 100 line
+  // discount and a 50 invoice discount saved as 1003, re-read as 885, then 767,
+  // then 649. Silent, plausible-looking, and monotonic.
+  const invoiceDiscount =
+    tax.mode === "legacy" ? enteredDiscount : appliedDiscount;
+  const discount = round2(lineDiscountTotal + invoiceDiscount);
 
   // 6. Tax.
   let cgst = 0;
@@ -862,6 +879,7 @@ export const computeTotals = (input: TotalsInput): InvoiceTotals => {
   return {
     subtotal,
     discount,
+    invoiceDiscount: round2(invoiceDiscount),
     taxableValue,
     lines,
     taxRows,

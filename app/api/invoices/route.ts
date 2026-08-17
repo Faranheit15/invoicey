@@ -560,7 +560,10 @@ const normalizePayload = (
     currency,
     items: storedItems,
     subtotal: totals.subtotal,
-    discount: totals.discount,
+    // The invoice-level portion ONLY. `totals.discount` is the printed figure
+    // and already includes every line discount, which are stored on the lines —
+    // persisting it here made each re-save subtract them again.
+    discount: totals.invoiceDiscount,
     cgst: totals.cgst,
     sgst: totals.sgst,
     igst: totals.igst,

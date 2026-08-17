@@ -72,6 +72,7 @@ describe("computeTotals — legacy mode (pre-Phase-2 documents)", () => {
     expect(t).toEqual({
       subtotal: 250,
       discount: 25,
+      invoiceDiscount: 25,
       taxableValue: 225,
       lines: [
         {
@@ -969,6 +970,7 @@ describe("InvoiceTotals shape", () => {
           "convenienceCharge",
           "discount",
           "igst",
+          "invoiceDiscount",
           "lines",
           "roundOff",
           "sgst",
@@ -1312,3 +1314,48 @@ describe("buildLineItemColumns lives here now, beside buildTotalsRows", () => {
     ]);
   });
 });
+
+describe("discount round-trip — a saved invoice must re-read identically", () => {
+  it("does not subtract line discounts twice when the record is read back", () => {
+    // The gap no test covered: every discount test computed once and stopped.
+    // The API stores `invoiceDiscount`, not `discount` — the printed figure
+    // already contains the line discounts, and those live on the lines, so
+    // storing it made each re-save take them off again. 1003 -> 885 -> 767.
+    const computed = computeTotals({
+      items: [
+        { quantity: 1, unitPrice: 1000, discount: 100, taxRatePercent: 18 },
+      ],
+      discount: 50,
+      convenienceCharge: 0,
+      tax: derived(),
+    });
+    expect(computed.discount).toBe(150);
+    expect(computed.invoiceDiscount).toBe(50);
+
+    const stored = {
+      items: [
+        { name: "x", price: 1000, quantity: 1, discount: 100, taxRatePercent: 18 },
+      ],
+      discount: computed.invoiceDiscount,
+      convenienceCharge: 0,
+      taxTreatment: "gst",
+      supplyKind: "intra",
+      supplierStateCode: "29",
+      currency: "INR",
+    } as never;
+
+    const reread = resolveRecordAmounts(stored);
+    expect(reread.discount).toBe(computed.discount);
+    expect(reread.taxableValue).toBe(computed.taxableValue);
+    expect(reread.total).toBe(computed.total);
+
+    // And it must still hold after a second round trip, which is where the
+    // monotonic shrink showed itself.
+    const again = resolveRecordAmounts({
+      ...(stored as Record<string, unknown>),
+      discount: reread.invoiceDiscount,
+    } as never);
+    expect(again.total).toBe(computed.total);
+  });
+});
+

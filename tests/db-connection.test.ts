@@ -53,4 +53,12 @@ describe("connectDB — pooling and caching", () => {
     expect(result.options?.serverSelectionTimeoutMS).toBe(5000);
     expect(result.options?.socketTimeoutMS).toBe(20000);
   });
+
+  it("never builds indexes itself — that is the owner's off-hours job", () => {
+    // Mongoose defaults this to true, which would have the first request after
+    // a cold start foreground-build the FULL unique invoice-number index on a
+    // collection that may still hold the duplicates the migration is meant to
+    // report. The failure is swallowed, so it would fail invisibly too.
+    expect(result.options?.autoIndex).toBe(false);
+  });
 });
