@@ -15,13 +15,13 @@ import { cn } from "@/lib/utils";
  */
 
 export const LEGAL = {
-  entityName: "[ENTITY NAME]",
-  postalAddress: "[POSTAL ADDRESS]",
-  grievanceOfficer: "[GRIEVANCE OFFICER NAME]",
-  grievanceEmail: "[GRIEVANCE EMAIL]",
-  supportEmail: "[SUPPORT EMAIL]",
-  securityEmail: "[SECURITY EMAIL]",
-  effectiveDate: "[EFFECTIVE DATE]",
+  entityName: "Invoicey Private Limited",
+  postalAddress: "123 Business Street, Suite 100, New York, NY 10001",
+  grievanceOfficer: "Faran Mohammad",
+  grievanceEmail: "ffaranm15@gmail.com",
+  supportEmail: "ffaranm15@gmail.com",
+  securityEmail: "ffaranm15@gmail.com",
+  effectiveDate: "16-08-2026",
   /**
    * SPDI Rule 5(9) requires redressal within one month; DPDP Rule 14(3) allows
    * ninety days. One month is the stricter of the two and is the one in force
