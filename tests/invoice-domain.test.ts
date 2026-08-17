@@ -5,6 +5,7 @@ import {
   computeTotals,
   resolveRecordAmounts,
   roundToRupee,
+  UNKNOWN_GST_RATE_ERROR,
   validateInvoice,
   validateInvoiceDetailed,
   type InvoiceTotals,
@@ -793,14 +794,95 @@ describe("validateInvoice", () => {
     ).toBe("Country of destination is required on an export invoice.");
   });
 
-  it("requires an LUT ARN when exporting without payment of tax", () => {
+  it("requires an LUT ARN when a REGISTERED supplier exports without payment of tax", () => {
     expect(
       validateInvoice({
         ...valid,
+        taxTreatment: "gst",
+        supplierStateCode: "29",
+        placeOfSupplyStateCode: "29",
         supplyKind: "sez",
         withPaymentOfTax: false,
       })
     ).toBe("Enter your LUT ARN, or switch to 'with payment of tax'.");
+  });
+
+  /**
+   * §1.2, the `none` + `export` row: no endorsement, no LUT.
+   *
+   * An LUT is a filing a GST-registered person makes. Demanding one from an
+   * unregistered freelancer — the majority case, below the ₹20 lakh services
+   * threshold — blocked them from saving an export invoice at all, and left
+   * them only two ways out, both of which put a false statement on a legal
+   * document. This is the rule that has to stay gated on registration.
+   */
+  it("does not ask an UNREGISTERED exporter for an LUT ARN", () => {
+    expect(
+      validateInvoice({
+        ...valid,
+        taxTreatment: "none",
+        supplyKind: "export",
+        countryOfDestination: "United States",
+        withPaymentOfTax: false,
+        lutArn: "",
+      })
+    ).toBeNull();
+  });
+
+  it("does not ask a composition dealer for an LUT ARN either", () => {
+    expect(
+      validateInvoice({
+        ...valid,
+        taxTreatment: "composition",
+        supplyKind: "sez",
+        withPaymentOfTax: false,
+        lutArn: "",
+        // Services (SAC 99…), so the composition inter-State rule warns
+        // rather than blocking — the LUT rule is the one under test.
+        items: [{ description: "Consulting", hsnSac: "998314" }],
+      })
+    ).toBeNull();
+  });
+
+  /* Rule 46(b): the charset and length of the number itself. */
+  it("rejects an invoice number with characters Rule 46(b) forbids", () => {
+    expect(validateInvoice({ ...valid, invoiceNumber: "a b#c" })).toBe(
+      'Invoice number cannot contain "#". Use only letters, numbers, - and /.'
+    );
+  });
+
+  it("rejects an invoice number longer than 16 characters", () => {
+    expect(
+      validateInvoice({ ...valid, invoiceNumber: "INVOICE/2026-27/0001" })
+    ).toBe("Invoice number must be 16 characters or fewer (this one is 20).");
+  });
+
+  it("accepts a 16-character number, and one whose spaces normalise away", () => {
+    expect(
+      validateInvoice({ ...valid, invoiceNumber: "1234567890123456" })
+    ).toBeNull();
+    expect(validateInvoice({ ...valid, invoiceNumber: "INV 001" })).toBeNull();
+  });
+
+  /* A rate GST does not have is rejected, not dropped. */
+  it("rejects a non-slab line rate", () => {
+    expect(
+      validateInvoice({
+        ...valid,
+        items: [{ description: "Widget", taxRatePercent: 15 }],
+      })
+    ).toBe(UNKNOWN_GST_RATE_ERROR);
+  });
+
+  it("accepts every live slab and both retired ones", () => {
+    for (const rate of [0, 0.25, 3, 5, 12, 18, 28, 40]) {
+      expect(
+        validateInvoice({
+          ...valid,
+          items: [{ description: "Widget", hsnSac: "998314", taxRatePercent: rate }],
+        })
+      ).toBeNull();
+    }
   });
 
   it("rejects a recipient that is both in an SEZ and overseas", () => {
@@ -1156,8 +1238,72 @@ describe("buildLineItemColumns lives here now, beside buildTotalsRows", () => {
       "hsnSac",
       "quantity",
       "unitPrice",
+      // Rule 46(j): the base the tax was charged on. Without it the row reads
+      // `Rate 18 | Tax 18.00 | Amount 100.00` the moment a discount moves the
+      // taxable value off the gross, and the table stops reconciling.
+      "taxable",
       "taxRate",
       "tax",
+      "amount",
+    ]);
+  });
+
+  it("prints a taxable value that reconciles: rate x taxable = tax, per line", () => {
+    // A ₹1,000 line at 18% with a ₹34 invoice-level discount. The old table
+    // printed Amount 1000.00 next to Tax 174.24 and left the reader to guess.
+    const totals = computeTotals({
+      items: [{ quantity: 1, unitPrice: 1_000, taxRatePercent: 18 }],
+      discount: 32,
+      convenienceCharge: 0,
+      tax: derived(),
+    });
+    const line = totals.lines[0];
+    expect(line.gross).toBe(1_000);
+    expect(line.taxable).toBe(968);
+    expect(
+      Number(((line.taxable * line.ratePercent) / 100).toFixed(2))
+    ).toBe(line.tax.cgst + line.tax.sgst + line.tax.igst);
+
+    const columns = buildLineItemColumns({
+      items: [{ name: "W", quantity: 1, price: 1_000 }],
+      totals,
+      currency: "INR",
+    });
+    expect(columns.map((column) => column.key)).toContain("taxable");
+  });
+
+  it("shows the taxable value on a discounted line even when no tax is charged", () => {
+    const totals = computeTotals({
+      items: [{ quantity: 1, unitPrice: 1_000, discount: 100 }],
+      discount: 0,
+      convenienceCharge: 0,
+      tax: { mode: "none", suppressedBecause: "unregistered" },
+    });
+    const columns = buildLineItemColumns({
+      items: [{ name: "W", quantity: 1, price: 1_000 }],
+      totals,
+      currency: "INR",
+    });
+    expect(columns.map((column) => column.key)).toContain("taxable");
+  });
+
+  it("leaves an undiscounted, untaxed invoice on the five original columns", () => {
+    const totals = computeTotals({
+      items: [{ quantity: 1, unitPrice: 1_000 }],
+      discount: 0,
+      convenienceCharge: 0,
+      tax: { mode: "none", suppressedBecause: "unregistered" },
+    });
+    const columns = buildLineItemColumns({
+      items: [{ name: "W", quantity: 1, price: 1_000 }],
+      totals,
+      currency: "INR",
+    });
+    expect(columns.map((column) => column.key)).toEqual([
+      "index",
+      "description",
+      "quantity",
+      "unitPrice",
       "amount",
     ]);
   });

@@ -43,6 +43,9 @@ findings, all fixed before the commit.
 
 - [ ] Run `bun run migrate:purge-tokens`, then rotate DB backups and revoke
       Firebase refresh tokens
+- [ ] Run `bun run migrate:invoice-numbering`, resolve any duplicates it reports
+      BY HAND, then create `uniq_user_fy_invoice_number` in the background. The
+      unique index cannot build until the backfill has run.
 - [!] Google Cloud budget alert
 - [!] Paid Gemini key — free-tier prompts train Google's models, and the prompt
       carries the user's clients' names, addresses and amounts
@@ -94,9 +97,12 @@ findings, all fixed before the commit.
 - [x] 1. `taxTreatment`
 - [x] 2. GSTIN fields + `lib/gstin.ts`
 - [x] 3. Business profile
-- [~] 4. Invoice numbering — pure module done and tested, but **not enforced**:
-      no unique index, no charset/length rule on the write path, and
-      `lib/invoices.ts` still mints `Date.now().slice(-6)`. Marked done in error.
+- [x] 4. Invoice numbering — the pure module was landed and tested but left
+      **unenforced** (no unique index, no charset/length rule on the write path,
+      and `lib/invoices.ts` still minting `Date.now().slice(-6)`), and marked
+      done in error. Enforced in the follow-up pass; see the audit section and
+      "The unique index" note below. The index still has to be BUILT by the
+      owner, after the migration.
 - [x] 5. Place of supply + IGST
 - [x] 6. Per-line HSN/SAC + UOM + tax rate
 - [x] 7. Amount in words, `en-GB` dates, PAN + TDS, signature block, round-off
@@ -140,15 +146,56 @@ Fixed:
       where the old code summed raw and rounded once, shifting the total by a
       paisa on fractional quantities — silently rewriting an issued document
 
+Fixed in the follow-up pass:
+- [x] The statutory export endorsement printed on an unregistered supplier's
+      document, and the LUT rule *blocked them from saving at all*.
+      `exportEndorsementFor` and the LUT rule are both gated on
+      `taxTreatment === "gst"` now (§1.2's `none` + `export` row: no
+      endorsement, no LUT). An unregistered freelancer billing abroad issues a
+      plain INVOICE with no GST language on it, and saves.
+- [x] Rule 46(b) enforced end to end: `checkInvoiceNumber` on the write path
+      (the specific rule broken is the message), stored `financialYear` +
+      `invoiceNumberKey`, a **full** unique index, a 409 that names the number,
+      the year and the next free number, and
+      `createDefaultInvoiceFormState` no longer mints `Date.now().slice(-6)` —
+      the number comes from the suggestion endpoint.
+- [x] Omitting `taxTreatment` no longer buys arbitrary invoice-level CGST/SGST.
+      "Predates Phase 2" is a property of the STORED RECORD, not of a request:
+      POST always requires the field, PUT allows its absence only when the
+      document being updated has none of its own.
+- [x] Rule 46(j): the line table prints the taxable value, so
+      rate × taxable = tax reconciles on the page (the row that read
+      `Rate 18 | Tax 174.00 | Amount 1000.00` now carries `Taxable 968.00`).
+- [x] A non-slab rate (15%) is rejected with a message instead of being dropped
+      and saving an untaxed invoice under a preview that showed the tax.
+
 Still open:
-- [ ] Rule 46(b) unenforced (see item 4 above) — **highest remaining risk**
-- [ ] Rule 46(j): per-line taxable value never printed, so the line table does
-      not reconcile (a line reads Rate 18 | Tax 174.00 | Amount 1000.00)
-- [ ] The statutory export endorsement prints on an unregistered supplier's
-      document, and the LUT rule *blocks them from saving at all*
-- [ ] Omitting `taxTreatment` still buys arbitrary invoice-level CGST/SGST
-- [ ] A non-slab rate (e.g. 15%) is silently dropped rather than rejected
 - [ ] Rule 46(e)/(n): no delivery-address field exists in the schema
+
+### The unique index: full, and what has to happen before it exists
+
+`{ userId, financialYear, invoiceNumberKey }`, `unique: true`, **no
+`partialFilterExpression`**. `documentType` is deliberately not in the key:
+there is one series today, and a field that is `undefined` on every legacy row
+would widen the key with a null that means nothing. A future proforma or
+credit-note series gets its own index when it exists.
+
+Partial would be wrong for the reason the design gives and the plan missed:
+nothing here is ever hard-deleted, so a partial filter on `is_deleted` would let
+a user soft-delete INV/2026-27/007 and issue a second, different
+INV/2026-27/007, leaving two documents that share one serial and are both
+retained for 72 months under §36. A soft-deleted number therefore stays spent,
+and the suggestion endpoint now counts soft-deleted rows when it proposes the
+next number — otherwise it would hand back a number the index refuses.
+
+**Deployment order is not optional.** Every existing document is missing both
+fields, so they all index as `(null, null)` and a unique build fails on the
+first pair. Run `bun run migrate:invoice-numbering` first: it backfills both
+fields, never touches `invoiceNumber`, and **reports duplicates rather than
+renumbering** — renumbering is the only irreversible act available here, because
+the number is printed on a document the client already holds and quoted in their
+books, so a human decides with the list in front of them. Only then create the
+index in the background, off-hours.
 
 ## Phase 3 — Make it worth coming back to
 

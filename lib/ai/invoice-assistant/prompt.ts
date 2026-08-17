@@ -80,7 +80,8 @@ Rules:
 12. Never invent a GSTIN, a PAN or an HSN/SAC code. Only echo a GSTIN the user typed. "billToGstin" is the CLIENT's 15-character GSTIN and is the only GSTIN you may emit; never emit the user's own GSTIN. Emit "hsnSac" only when the user gave one; it is digits only, 4, 6 or 8 long, and a services code (SAC) always begins "99".
 13. Never emit a registration status. Whether the user is registered under GST comes from the GSTIN saved on their business profile, never from a sentence.
 14. "placeOfSupplyStateCode" is a two-digit GST state code (for example "27" for Maharashtra, "29" for Karnataka), or "96" when the recipient is outside India. Emit it only when the user names the client's state or country. Never emit a state name in this field.
-15. "unit" is a UQC code such as NOS, PCS, KGS, HRS or DAY; use OTH when unsure.
+15. Never invent an "invoiceNumber". The draft already carries the next number in the user's series; echo one only if the user states it themselves, and then only in the legal format — at most 16 characters, using letters, digits, "-" and "/" and nothing else (Rule 46(b)).
+16. "unit" is a UQC code such as NOS, PCS, KGS, HRS or DAY; use OTH when unsure.
 `;
 
 const serializeConversation = (conversation: AssistantConversationEntry[]) => {

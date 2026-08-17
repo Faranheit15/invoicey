@@ -100,6 +100,29 @@ describe("normalizeAssistantResponse — patch field handling", () => {
   });
 });
 
+describe("normalizeAssistantResponse — the invoice number", () => {
+  it("drops a model-invented number that breaks Rule 46(b)", () => {
+    // The draft already carries the number the server suggested. A patch
+    // carrying "INV #2026/0001" would land in form state and then block the
+    // save it was supposed to speed up.
+    for (const invalid of ["INV #2026/0001", "INVOICE/2026-27/0001", "INV_001"]) {
+      const res = normalizeAssistantResponse({
+        resolution: "ready",
+        patch: { invoiceNumber: invalid },
+      });
+      expect(res.patch.invoiceNumber).toBeUndefined();
+    }
+  });
+
+  it("keeps a legal one, with its whitespace normalised away", () => {
+    const res = normalizeAssistantResponse({
+      resolution: "ready",
+      patch: { invoiceNumber: " INV/2026-27/008 " },
+    });
+    expect(res.patch.invoiceNumber).toBe("INV/2026-27/008");
+  });
+});
+
 describe("applyInvoiceAssistantPatch", () => {
   it("merges only known fields and reports applied field names", () => {
     const base = createDefaultInvoiceFormState();

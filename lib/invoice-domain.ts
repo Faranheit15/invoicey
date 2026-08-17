@@ -17,6 +17,12 @@ import {
   normalizeGstin,
   stateCodeFromGstin,
 } from "@/lib/gstin";
+import {
+  checkInvoiceNumber,
+  invoiceNumberProblemMessage,
+  normalizeInvoiceNumber,
+} from "@/lib/invoice-number";
+import { isAcceptedGstRate } from "@/lib/gst-rates";
 
 /**
  * Invoice domain: the single source of truth for the money formula, the display
@@ -765,6 +771,7 @@ export type LineItemColumnKey =
   | "quantity"
   | "unitPrice"
   | "discount"
+  | "taxable"
   | "taxRate"
   | "tax"
   | "amount";
@@ -806,6 +813,11 @@ const ALL_LINE_ITEM_COLUMNS: LineItemColumn[] = [
   { key: "quantity", label: "Qty", align: "right", wrap: false },
   { key: "unitPrice", label: "Unit Price", align: "right", wrap: false },
   { key: "discount", label: "Discount", align: "right", wrap: false },
+  // Rule 46(j): "taxable value of supply ... taking into account discount or
+  // abatement, if any". It sits between the discount and the rate because that
+  // is the order the arithmetic runs in, and because the two columns to its
+  // right are the ones that have to reconcile against it.
+  { key: "taxable", label: "Taxable Value", align: "right", wrap: false },
   { key: "taxRate", label: "Rate", align: "right", wrap: false },
   { key: "tax", label: "Tax", align: "right", wrap: false },
   { key: "amount", label: "Amount", align: "right", wrap: false },
@@ -845,6 +857,21 @@ export const buildLineItemColumns = (
   }
   if (lines.some((line) => line.ratePercent > 0)) {
     present.add("taxRate");
+  }
+  // Rule 46(j). Without it the table does not reconcile: "Amount" is the line's
+  // GROSS value, so a line carrying a per-line discount or a share of the
+  // invoice-level discount reads `Rate 18 | Tax 174.00 | Amount 1000.00`, and
+  // 18% of 1000 is 180. The taxable value is the number the tax was actually
+  // charged on, and printing it makes rate x taxable = tax exact on the page.
+  //
+  // Shown whenever tax was charged, and also whenever a discount moved the
+  // taxable value away from the gross — a document whose Amount column no
+  // longer equals what was billed for owes the reader the difference.
+  if (
+    (input.totals.taxRows ?? []).length > 0 ||
+    lines.some((line) => line.taxable !== line.gross)
+  ) {
+    present.add("taxable");
   }
   // The per-line tax column tracks the TOTALS block: if no tax row is printed
   // (unregistered, composition, reverse charge, zero-rated under LUT) then no
@@ -891,6 +918,17 @@ export interface InvoiceValidation {
   warnings: string[];
 }
 
+/**
+ * The one wording for a line rate that is not a GST slab.
+ *
+ * A CONSTANT, not a template: `lib/invoice-field-validation.ts` looks its specs
+ * up by the validator's exact message, and interpolating the offending rate
+ * would make every occurrence a different string. The line at fault is pointed
+ * at by that module instead, which is more useful than naming the number.
+ */
+export const UNKNOWN_GST_RATE_ERROR =
+  "That isn't a GST rate. Use 0%, 0.25%, 3%, 5%, 18% or 40%.";
+
 const isValidDate = (value: string): boolean =>
   Boolean(value) && !Number.isNaN(new Date(value).getTime());
 
@@ -919,6 +957,22 @@ export const validateInvoiceDetailed = (
   }
   if (!invoice.invoiceNumber.trim()) {
     return fail("Invoice number is required");
+  }
+  /**
+   * Rule 46(b): 16 characters at most, and only letters, digits, `-` and `/`.
+   *
+   * Normalised first (whitespace removed, case untouched) so that a number
+   * pasted out of a PDF is judged on what will actually be stored, and so a
+   * trailing space is not reported as an illegal character. The specific
+   * problem is surfaced, never a generic "invalid": this is the field an
+   * auditor looks at first, and "invalid invoice number" over a legally
+   * constrained format is a dead end for whoever has to fix it.
+   */
+  const invoiceNumberProblem = checkInvoiceNumber(
+    normalizeInvoiceNumber(invoice.invoiceNumber)
+  );
+  if (invoiceNumberProblem) {
+    return fail(invoiceNumberProblemMessage(invoiceNumberProblem));
   }
   if (!isValidDate(invoice.invoiceDate)) {
     return fail("Invoice date is invalid");
@@ -1010,12 +1064,48 @@ export const validateInvoiceDetailed = (
   if (supplyKind === "export" && isBlank(invoice.countryOfDestination)) {
     return fail("Country of destination is required on an export invoice.");
   }
+  /**
+   * The LUT rule belongs to a REGISTERED supplier and to no one else.
+   *
+   * An LUT (Letter of Undertaking) is a filing a GST-registered person makes so
+   * that they may export without paying IGST; §1.2's table gives the
+   * unregistered row "no endorsement, no LUT". Applying it to everyone blocked
+   * the single most common export case this product has — a freelancer below
+   * the ₹20 lakh services threshold billing a client abroad — from saving at
+   * all, and left them two ways out, both of which put a false statement on a
+   * legal document: invent an ARN (printing "...UNDER BOND OR LETTER OF
+   * UNDERTAKING WITHOUT PAYMENT OF INTEGRATED TAX" over a plain INVOICE with no
+   * GSTIN), or tick with-payment-of-tax (printing "...ON PAYMENT OF INTEGRATED
+   * TAX" while charging zero). An unregistered person has no registration to
+   * make either claim under. `exportEndorsementFor` is gated on the same axis,
+   * so nothing statutory prints on their document either.
+   */
   if (
+    treatment === "gst" &&
     (supplyKind === "export" || supplyKind === "sez") &&
     !invoice.withPaymentOfTax &&
     isBlank(invoice.lutArn)
   ) {
     return fail("Enter your LUT ARN, or switch to 'with payment of tax'.");
+  }
+
+  /**
+   * A rate GST does not have is REJECTED, not dropped.
+   *
+   * The write path used to omit an unrecognised `taxRatePercent` and save the
+   * rest, so a 15% line saved silently with no tax on it while the editor
+   * preview had shown the user a total that included it. A rate is not a value
+   * that needs bringing into range — it is either a slab or it is a mistake,
+   * and a document that quietly disagrees with the screen it was created on is
+   * worse than a blocked save. Retired slabs (12, 28) pass and warn below: a
+   * back-dated document carries them legitimately.
+   */
+  const hasUnknownRate = invoice.items.some(
+    (item) =>
+      item.taxRatePercent !== undefined && !isAcceptedGstRate(item.taxRatePercent)
+  );
+  if (hasUnknownRate) {
+    return fail(UNKNOWN_GST_RATE_ERROR);
   }
 
   if (treatment === "composition" && supplyKind && supplyKind !== "intra") {

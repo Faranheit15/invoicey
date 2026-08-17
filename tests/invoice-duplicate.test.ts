@@ -303,7 +303,10 @@ class FakeInvoice {
     let rows = store.filter(
       (doc) =>
         doc.userId === filter.userId &&
-        doc.is_deleted !== true &&
+        // Soft-deleted rows are NOT excluded here any more: the unique index is
+        // full, so a soft-deleted document still holds its number and the
+        // suggester has to skip past it. The route no longer sends the filter.
+        (filter.is_deleted === undefined || doc.is_deleted !== true) &&
         (!window ||
           (doc.invoiceDate >= window.$gte && doc.invoiceDate < window.$lt))
     );
@@ -380,10 +383,15 @@ describe("GET /api/invoices?suggest_number=1", () => {
     );
     expect((await res.json()).invoiceNumber).toBe("INV/2026-27/001");
     expect(finds[0].userId).toBe("A");
-    expect(finds[0].is_deleted).toEqual({ $ne: true });
   });
 
-  it("ignores soft-deleted invoices", async () => {
+  /**
+   * The unique index is FULL, so a soft-deleted invoice keeps its number for as
+   * long as it is retained. Suggesting that number back would hand the user a
+   * value the index then refuses — skipping past it is the mitigation that
+   * makes keeping the index full workable.
+   */
+  it("counts a soft-deleted number as spent rather than reissuing it", async () => {
     store.push({
       userId: "A",
       is_deleted: true,
@@ -393,7 +401,7 @@ describe("GET /api/invoices?suggest_number=1", () => {
     const res = await GET(
       makeReq("http://x/api/invoices?suggest_number=1&date=2026-08-17")
     );
-    expect((await res.json()).invoiceNumber).toBe("INV/2026-27/001");
+    expect((await res.json()).invoiceNumber).toBe("INV/2026-27/501");
   });
 
   it("restarts the series in a new financial year", async () => {

@@ -292,6 +292,13 @@ export interface InvoiceFormSeed {
   paymentInfo?: string;
   dueDays?: number;
   /**
+   * The next number in this user's series, from the suggestion endpoint. Seeded
+   * rather than generated: only the server can see the whole series, and a
+   * number invented in the browser is how the old `Date.now()` collisions
+   * happened. Absent leaves the field blank for the user to fill.
+   */
+  invoiceNumber?: string;
+  /**
    * Seller-side GST identity, carried over from the saved profile.
    *
    * `taxTreatment` is NOT a question the editor asks. The profile route derives
@@ -382,7 +389,24 @@ export const createDefaultInvoiceFormState = (
     billTo: "",
     billToEmail: "",
     billToAddress: "",
-    invoiceNumber: `INV-${Date.now().toString().slice(-6)}`,
+    /**
+     * EMPTY unless the caller was given one by the server.
+     *
+     * This used to be `INV-${Date.now().toString().slice(-6)}`. The last six
+     * digits of the epoch in milliseconds cycle every 10^6 ms — 16 minutes and
+     * 40 seconds — so two invoices created that far apart collide, which at any
+     * real volume is a certainty rather than a risk. It was also minted in the
+     * BROWSER, before the server (the only party that can see the whole series)
+     * was involved at all.
+     *
+     * The number now comes from `GET /api/invoices?suggest_number=1&date=…`,
+     * which reads the highest number in the financial year and increments it.
+     * Nothing is written by that read, so an abandoned draft leaves no gap in a
+     * series Rule 46(b) requires to be consecutive. A failed suggestion leaves
+     * the field blank and the user types one — blank is refused by validation,
+     * where a duplicate would have been accepted silently.
+     */
+    invoiceNumber: seed.invoiceNumber ?? "",
     invoiceDate: toDateInputValue(invoiceDate),
     dueDate: toDateInputValue(dueDate),
     terms: seed.terms ?? "Payment due within 14 days.",

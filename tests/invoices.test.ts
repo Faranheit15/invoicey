@@ -321,6 +321,24 @@ describe("createDefaultInvoiceFormState — the GST defaults (Phase 2)", () => {
     expect(form.currency).toBe("INR");
     expect(form.placeOfSupplyStateCode).toBe("");
   });
+
+  /**
+   * The old default was `INV-${Date.now().toString().slice(-6)}` — six digits
+   * of the epoch in milliseconds, which cycle every 16 minutes 40 seconds, so
+   * two invoices that far apart carried the same number. It was also minted in
+   * the browser, where the rest of the series is invisible.
+   */
+  it("mints NO invoice number of its own", () => {
+    expect(createDefaultInvoiceFormState().invoiceNumber).toBe("");
+    expect(createDefaultInvoiceFormState().invoiceNumber).not.toMatch(/^INV-\d{6}$/);
+  });
+
+  it("takes the number the server suggested, when there is one", () => {
+    expect(
+      createDefaultInvoiceFormState({ invoiceNumber: "INV/2026-27/008" })
+        .invoiceNumber
+    ).toBe("INV/2026-27/008");
+  });
 });
 
 describe("checkSupplierStateAgainstGstin (§5.9, caller-side)", () => {

@@ -25,10 +25,12 @@
  */
 
 import {
+  UNKNOWN_GST_RATE_ERROR,
   validateInvoiceDetailed,
   type ValidatableInvoice,
   type ValidatableInvoiceItem,
 } from "@/lib/invoice-domain";
+import { isAcceptedGstRate } from "@/lib/gst-rates";
 import { isValidGstin, normalizeGstin, stateCodeFromGstin } from "@/lib/gstin";
 
 /**
@@ -89,6 +91,13 @@ interface RepairContext {
 interface IssueSpec {
   /** The validator message this spec answers to, matched exactly. */
   error: string;
+  /**
+   * A second way to recognise this spec's error, for the one rule whose message
+   * is not a constant: Rule 46(b) names the characters or the length that broke
+   * it, so there is no single string to key on. Consulted only after the exact
+   * lookup misses.
+   */
+  matches?: (error: string) => boolean;
   /** Which control the user has to go and fix. */
   field: (context: RepairContext) => InvoiceFieldPath | null;
   /** The line item at fault, when there is one. */
@@ -108,6 +117,15 @@ const withItems = (
 ): ValidatableInvoice => ({ ...invoice, items: invoice.items.map(map) });
 
 const isBlank = (value: string | undefined): boolean => !value || !value.trim();
+
+/** The first line carrying a rate GST does not have. */
+const firstUnknownRateLine = ({ invoice }: RepairContext): number | undefined => {
+  const index = invoice.items.findIndex(
+    (item) =>
+      item.taxRatePercent !== undefined && !isAcceptedGstRate(item.taxRatePercent)
+  );
+  return index === -1 ? undefined : index;
+};
 
 const firstUncodedTaxedLine = ({ invoice }: RepairContext): number | undefined => {
   const index = invoice.items.findIndex(
@@ -138,7 +156,20 @@ const ISSUE_SPECS: readonly IssueSpec[] = [
   {
     error: "Invoice number is required",
     field: () => "invoiceNumber",
-    repair: (invoice) => ({ ...invoice, invoiceNumber: "—" }),
+    // "INV-1", not "—": an em dash is not one of the four character classes
+    // Rule 46(b) allows, so repairing with it would manufacture the charset
+    // error on the very next pass and report a problem the user does not have.
+    repair: (invoice) => ({ ...invoice, invoiceNumber: "INV-1" }),
+  },
+  {
+    // Rule 46(b) charset/length. The message names the offending characters or
+    // the actual length, so it is matched by shape rather than by identity.
+    error: "Invoice number (Rule 46(b))",
+    matches: (error) =>
+      error.startsWith("Invoice number cannot contain") ||
+      error.startsWith("Invoice number must be"),
+    field: () => "invoiceNumber",
+    repair: (invoice) => ({ ...invoice, invoiceNumber: "INV-1" }),
   },
   {
     error: "Invoice date is invalid",
@@ -240,6 +271,23 @@ const ISSUE_SPECS: readonly IssueSpec[] = [
     repair: (invoice) => ({ ...invoice, lutArn: "—" }),
   },
   {
+    error: UNKNOWN_GST_RATE_ERROR,
+    field: (context) => {
+      const index = firstUnknownRateLine(context);
+      return index === undefined ? null : `items.${index}.taxRatePercent`;
+    },
+    itemIndex: firstUnknownRateLine,
+    // Cleared, not snapped to the nearest slab: which slab the user meant is
+    // exactly what is unknown, and guessing it would price the invoice.
+    repair: (invoice) =>
+      withItems(invoice, (item) =>
+        item.taxRatePercent !== undefined &&
+        !isAcceptedGstRate(item.taxRatePercent)
+          ? { ...item, taxRatePercent: undefined }
+          : item
+      ),
+  },
+  {
     error: "A composition dealer cannot make an inter-State supply of goods.",
     field: () => "items.0.hsnSac",
     repair: (invoice) =>
@@ -334,7 +382,10 @@ export const collectInvoiceIssues = (
     }
     seen.add(error);
 
-    const spec = SPEC_BY_ERROR.get(error);
+    const currentError: string = error;
+    const spec =
+      SPEC_BY_ERROR.get(currentError) ??
+      ISSUE_SPECS.find((candidate) => candidate.matches?.(currentError));
     if (!spec) {
       // A rule added to the validator without a spec here. Report it verbatim
       // and stop — an unknown error is still an error the user must see, and

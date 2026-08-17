@@ -20,6 +20,7 @@ import {
   documentTypeFor,
   type DocumentType,
   type SupplyKind,
+  type TaxTreatment,
 } from "@/lib/gst-supply";
 import { formatGstRate, placeOfSupplyLabelFor } from "@/lib/gst-rates";
 import { amountInWordsIndian } from "@/lib/amount-in-words";
@@ -159,6 +160,11 @@ export const buildLineItemCells = (
         return money(unitPrice);
       case "discount":
         return money(line?.lineDiscount ?? 0);
+      // Rule 46(j). This is the base the line's tax was charged on — gross,
+      // less the line's own discount, less its pro-rata share of the
+      // invoice-level one — so `taxRate` x this equals `tax` on the page.
+      case "taxable":
+        return money(line ? line.taxable : quantity * unitPrice);
       case "taxRate":
         if (!line || line.ratePercent <= 0) {
           return options.rawNumbers ? "0" : "-";
@@ -204,7 +210,23 @@ const documentTypeForRecord = (invoice: InvoiceRecord): DocumentType => {
 export const exportEndorsementFor = (input: {
   supplyKind?: SupplyKind;
   withPaymentOfTax?: boolean;
+  /**
+   * ABSENT means a pre-Phase-2 record, which carries no `supplyKind` either and
+   * so never reaches the endorsement. Present and not `"gst"` is the case this
+   * gate exists for.
+   */
+  taxTreatment?: TaxTreatment;
 }): string | null => {
+  // Both endorsements are declarations made UNDER a GST registration: one says
+  // integrated tax was paid on this export, the other that it was not paid
+  // because a Letter of Undertaking is on file. An unregistered supplier (§1.2,
+  // the `none` + `export` row) and a composition dealer have no registration to
+  // make either statement under, and printing one over their INVOICE or BILL OF
+  // SUPPLY — which carries no GSTIN at all — is a false statement on a legal
+  // document. They export on a plain invoice with no GST language on it.
+  if (input.taxTreatment !== "gst") {
+    return null;
+  }
   if (input.supplyKind !== "export" && input.supplyKind !== "sez") {
     return null;
   }

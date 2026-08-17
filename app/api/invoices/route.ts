@@ -23,7 +23,6 @@ import {
 } from "@/lib/gst-supply";
 import {
   MAX_UNIT_LENGTH,
-  isAcceptedGstRate,
   isValidHsnSac,
   placeOfSupplyLabelFor,
 } from "@/lib/gst-rates";
@@ -40,7 +39,12 @@ import {
   parseInvoiceListSort,
 } from "@/lib/server/invoice-list-query";
 import { recordActivity, logRouteError } from "@/lib/server/log";
-import { deriveFinancialYear, suggestInvoiceNumber } from "@/lib/invoice-number";
+import {
+  deriveFinancialYear,
+  invoiceNumberKey,
+  normalizeInvoiceNumber,
+  suggestInvoiceNumber,
+} from "@/lib/invoice-number";
 import {
   financialYearRange,
   highestInvoiceNumber,
@@ -51,8 +55,12 @@ type InvoiceStatus = "draft" | "sent" | "paid" | "overdue";
 /**
  * How many of the financial year's invoices the number suggester reads.
  *
- * There is no `financialYear` field on the document, so "the highest number in
- * this year" is a date-range query plus `highestInvoiceNumber` in JS. Bounded
+ * "The highest number in this year" is a date-range query plus
+ * `highestInvoiceNumber` in JS, and stays that way even though `financialYear`
+ * is stored now: every document written before the backfill migration has no
+ * such field, and a query on it would silently skip them and suggest a number
+ * that is already in use. Switch to the field once the migration has run
+ * everywhere. Bounded
  * so a user with a very long history cannot turn a suggestion into a scan; the
  * rows come back newest-first, and a series that needs more than 500 invoices
  * of lookback is not a series this app can continue anyway.
@@ -177,6 +185,10 @@ interface NormalizedInvoicePayload extends Partial<NormalizedGstFields> {
   billToEmail: string;
   billToAddress: string;
   invoiceNumber: string;
+  /** Rule 46(b) uniqueness scope, derived from `invoiceDate`. Never from the client. */
+  financialYear: string;
+  /** The case-folded key the unique index is built on. Never from the client. */
+  invoiceNumberKey: string;
   invoiceDate: string;
   dueDate: string;
   terms: string;
@@ -315,15 +327,19 @@ const normalizeItems = (items: RawInvoiceItem[] = []): NormalizedInvoiceItem[] =
         );
       }
       if (item.taxRatePercent !== undefined) {
-        // WHITELISTED, not clamped. GST has a fixed slab table; a 15% line is
-        // not a rate that needs bringing into range, it is a rate that does not
-        // exist, and charging it to a client is worse than charging nothing.
-        // Retired slabs (12, 28) pass — a back-dated document carries them
-        // legitimately and `validateInvoice` warns rather than blocks.
-        const rate = Number(toNumber(item.taxRatePercent, 0).toFixed(2));
-        if (isAcceptedGstRate(rate)) {
-          normalized.taxRatePercent = rate;
-        }
+        // KEPT AS SENT (rounded to paise), then judged by `validateInvoice`.
+        //
+        // GST has a fixed slab table, so a 15% line is not a rate that needs
+        // bringing into range — it is a rate that does not exist. Dropping it
+        // here, which is what this did, saved the invoice with NO tax on it
+        // while the editor preview had just shown the user a total that
+        // included it: the document silently disagreed with the screen it was
+        // created on. Carrying the rate through to the validator turns that
+        // into a 400 naming the rule. Retired slabs (12, 28) are accepted and
+        // warned about — a back-dated document carries them legitimately.
+        normalized.taxRatePercent = Number(
+          toNumber(item.taxRatePercent, 0).toFixed(2)
+        );
       }
       return normalized;
     })
@@ -390,6 +406,15 @@ const normalizeGstFields = (
 const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
   const items = normalizeItems(raw.items || []);
   const gst = normalizeGstFields(raw);
+
+  // Rule 46(b) numbering. Both derived here and nowhere else: the financial
+  // year comes from the invoice DATE (not today — a 31 March invoice entered on
+  // 2 April belongs to the year that ended), and the key is what the unique
+  // index sees. Neither is read from the request; a client that could choose
+  // its own uniqueness scope could opt out of uniqueness.
+  const invoiceNumber = normalizeInvoiceNumber(cleanString(raw.invoiceNumber));
+  const invoiceDateRaw = cleanString(raw.invoiceDate);
+  const financialYear = deriveFinancialYear(invoiceDateRaw || new Date());
 
   const companyGstin = cleanGstin(raw.companyGstin);
   const billToGstin = cleanGstin(raw.billToGstin);
@@ -476,7 +501,14 @@ const normalizePayload = (raw: RawInvoicePayload): NormalizedInvoicePayload => {
     billTo: cleanString(raw.billTo),
     billToEmail: cleanString(raw.billToEmail),
     billToAddress: cleanString(raw.billToAddress),
-    invoiceNumber: cleanString(raw.invoiceNumber),
+    // Whitespace out, case untouched: this is the value printed on the
+    // document. Rule 46(b)'s charset and 16-character limit are enforced by
+    // `validateInvoice` on the normalised value, so "INV 001" is stored as
+    // "INV001" rather than rejected, while "INV#001" is refused with the rule
+    // it broke.
+    invoiceNumber,
+    financialYear,
+    invoiceNumberKey: invoiceNumberKey(invoiceNumber),
     invoiceDate: cleanString(raw.invoiceDate),
     dueDate: cleanString(raw.dueDate),
     terms: cleanString(raw.terms),
@@ -513,6 +545,106 @@ const isNotFoundOrInvalidIdError = (error: unknown): boolean => {
   return err?.name === "CastError";
 };
 
+/**
+ * The unique index on `{ userId, financialYear, invoiceNumberKey }` rejecting a
+ * second document with the same number in the same year. Mongo reports it as
+ * E11000; the driver surfaces it as `code: 11000` on a MongoServerError.
+ */
+const isDuplicateInvoiceNumberError = (error: unknown): boolean =>
+  (error as { code?: number } | null)?.code === 11000;
+
+/**
+ * A request that OMITTED `taxTreatment`, as opposed to a record that PREDATES
+ * it. The difference is not visible in the request at all, which is why it is
+ * answered from the STORED DOCUMENT: absence is a property a record has, not
+ * one a request can claim.
+ *
+ * Absence puts `computeTotals` on the legacy arm, where the invoice-level
+ * `cgst`/`sgst` are taken from the client verbatim — that arm exists so a
+ * document written before Phase 2 re-prints with the numbers it was issued
+ * with. Reachable by a NEW invoice, it is a hole: POST `{ cgst: 500, sgst: 500 }`
+ * with no GSTIN and no treatment stored exactly that and printed CGST and SGST
+ * rows on a document headed "INVOICE" — §32 says an unregistered person may not
+ * collect tax, and that shape is the shape of a fraudulent invoice. So:
+ *
+ *   - POST: absence is always a client that omitted the field. Rejected.
+ *   - PUT: absence is legitimate only when the document being updated has no
+ *     `taxTreatment` of its own. A record that HAS one cannot be walked back
+ *     onto the legacy arm by dropping the field from the request.
+ */
+const LEGACY_TAX_TREATMENT_ERROR =
+  "Choose whether GST applies to this invoice. Only invoices created before Invoicey had GST fields can keep the old flat tax amounts.";
+
+const omitsTaxTreatment = (raw: RawInvoicePayload): boolean =>
+  raw.taxTreatment === undefined || raw.taxTreatment === null;
+
+/**
+ * The next free number in `financialYear` for this user, or null.
+ *
+ * Shared by the suggestion endpoint and by the 409 path, so the number offered
+ * after a collision is arrived at exactly the way the pre-filled one was.
+ *
+ * SOFT-DELETED INVOICES ARE INCLUDED. The unique index is full, so a
+ * soft-deleted document still holds its number for as long as it is retained —
+ * suggesting a number the index will refuse is a dead end, and skipping past it
+ * is the mitigation the design names for keeping the index full.
+ */
+const nextNumberForYear = async (
+  userUid: string,
+  financialYear: string
+): Promise<string | null> => {
+  const range = financialYearRange(financialYear);
+  if (!range) {
+    return null;
+  }
+  const rows = (await Invoice.find(
+    {
+      userId: userUid,
+      invoiceDate: { $gte: range.start, $lt: range.end },
+    },
+    { invoiceNumber: 1 }
+  )
+    .sort({ createdAt: -1 })
+    .limit(NUMBER_SUGGESTION_SCAN_LIMIT)
+    .lean()) as unknown as { invoiceNumber?: string }[];
+
+  return suggestInvoiceNumber({
+    financialYear,
+    previous: highestInvoiceNumber(rows.map((row) => row.invoiceNumber)),
+  });
+};
+
+/**
+ * The 409 for a number already used in that financial year.
+ *
+ * A 500 was what this used to be, which told the user nothing and looked like
+ * an outage. The next free number rides along in the body AND in the message,
+ * because `ApiError` carries only the message to the editor.
+ */
+const duplicateNumberResponse = async (input: {
+  userUid: string;
+  invoiceNumber: string;
+  financialYear: string;
+}) => {
+  let suggestion: string | null = null;
+  try {
+    suggestion = await nextNumberForYear(input.userUid, input.financialYear);
+  } catch {
+    // A failed suggestion must not turn a clear 409 into a 500.
+    suggestion = null;
+  }
+  return NextResponse.json(
+    {
+      error: `Invoice number ${input.invoiceNumber} is already used in ${input.financialYear}.${
+        suggestion ? ` Try ${suggestion}.` : ""
+      }`,
+      code: "DUPLICATE_INVOICE_NUMBER",
+      suggestion,
+    },
+    { status: 409 }
+  );
+};
+
 const allowedStatuses: InvoiceStatus[] = ["draft", "sent", "paid", "overdue"];
 
 export async function GET(req: NextRequest) {
@@ -540,32 +672,16 @@ export async function GET(req: NextRequest) {
     if (searchParams.get("suggest_number") !== null) {
       const rawDate = (searchParams.get("date") || "").trim();
       const financialYear = deriveFinancialYear(rawDate || new Date());
-      const range = financialYearRange(financialYear);
-      if (!range) {
+      if (!financialYearRange(financialYear)) {
         return NextResponse.json(
           { error: "That date isn't one we can read." },
           { status: 400 }
         );
       }
 
-      const rows = (await Invoice.find(
-        {
-          userId: userUid,
-          is_deleted: { $ne: true },
-          invoiceDate: { $gte: range.start, $lt: range.end },
-        },
-        { invoiceNumber: 1 }
-      )
-        .sort({ createdAt: -1 })
-        .limit(NUMBER_SUGGESTION_SCAN_LIMIT)
-        .lean()) as unknown as { invoiceNumber?: string }[];
-
       const suggestion: InvoiceNumberSuggestion = {
         financialYear,
-        invoiceNumber: suggestInvoiceNumber({
-          financialYear,
-          previous: highestInvoiceNumber(rows.map((row) => row.invoiceNumber)),
-        }),
+        invoiceNumber: await nextNumberForYear(userUid, financialYear),
       };
       return NextResponse.json(suggestion);
     }
@@ -630,6 +746,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const rawPayload = (await req.json()) as RawInvoicePayload;
+    // A NEW invoice can never be a pre-Phase-2 document, so the legacy tax arm
+    // is not available to it. See `omitsTaxTreatment`.
+    if (omitsTaxTreatment(rawPayload)) {
+      return NextResponse.json(
+        { error: LEGACY_TAX_TREATMENT_ERROR },
+        { status: 400 }
+      );
+    }
     const payload = normalizePayload(rawPayload);
     // The head rollups go in as a tripwire: an inter-State supply that somehow
     // produced CGST/SGST (or the reverse) is a bug in the derivation, not a
@@ -653,7 +777,18 @@ export async function POST(req: NextRequest) {
       ...payload,
     });
 
-    await invoice.save();
+    try {
+      await invoice.save();
+    } catch (error: unknown) {
+      if (isDuplicateInvoiceNumberError(error)) {
+        return duplicateNumberResponse({
+          userUid,
+          invoiceNumber: payload.invoiceNumber,
+          financialYear: payload.financialYear,
+        });
+      }
+      throw error;
+    }
     recordActivity({
       userId: userUid,
       type: "invoice_create",
@@ -713,6 +848,20 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
+    // The legacy tax arm stays open for a document that really does predate
+    // Phase 2 — the STORED record is what decides, never the request. A record
+    // that already carries a treatment cannot be walked back onto it.
+    if (
+      omitsTaxTreatment(rawPayload) &&
+      existingInvoice.taxTreatment !== undefined &&
+      existingInvoice.taxTreatment !== null
+    ) {
+      return NextResponse.json(
+        { error: LEGACY_TAX_TREATMENT_ERROR },
+        { status: 400 }
+      );
+    }
+
     const payload = normalizePayload(rawPayload);
     // The head rollups go in as a tripwire: an inter-State supply that somehow
     // produced CGST/SGST (or the reverse) is a bug in the derivation, not a
@@ -731,7 +880,21 @@ export async function PUT(req: NextRequest) {
     }
 
     Object.assign(existingInvoice, payload);
-    await existingInvoice.save();
+    try {
+      // Re-saving a document with its own unchanged number does not violate the
+      // unique index — it is the same document — so no self-exclusion is needed
+      // here. This catches an edit that moves the number onto one already used.
+      await existingInvoice.save();
+    } catch (error: unknown) {
+      if (isDuplicateInvoiceNumberError(error)) {
+        return duplicateNumberResponse({
+          userUid,
+          invoiceNumber: payload.invoiceNumber,
+          financialYear: payload.financialYear,
+        });
+      }
+      throw error;
+    }
 
     recordActivity({
       userId: userUid,

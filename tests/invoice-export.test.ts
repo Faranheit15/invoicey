@@ -171,6 +171,56 @@ describe("createInvoiceHtml — Rule 46 export/SEZ endorsement", () => {
     expect(html).not.toContain("SUPPLY MEANT FOR EXPORT");
   });
 
+  /**
+   * §1.2, the `none` + `export` row. An unregistered freelancer billing a
+   * client abroad — the majority case, below the ₹20 lakh services threshold —
+   * issues a PLAIN INVOICE. Neither endorsement may appear on it: both are
+   * declarations made under a GST registration they do not have, printed over a
+   * document that carries no GSTIN.
+   */
+  it("prints NO endorsement for an unregistered exporter, either wording", () => {
+    for (const withPaymentOfTax of [true, false]) {
+      const html = createInvoiceHtml(
+        gstRecord({
+          taxTreatment: "none",
+          documentType: "invoice",
+          companyGstin: "",
+          supplyKind: "export",
+          placeOfSupplyStateCode: "96",
+          countryOfDestination: "United States",
+          recipientIsOutsideIndia: true,
+          withPaymentOfTax,
+          items: [{ name: "Consulting", price: 1000, quantity: 1 }],
+        })
+      );
+      expect(html).toContain("INVOICE");
+      expect(html).not.toContain("SUPPLY MEANT FOR EXPORT");
+      expect(html).not.toContain(EXPORT_ENDORSEMENT_WITH_TAX);
+      expect(html).not.toContain(EXPORT_ENDORSEMENT_UNDER_LUT);
+    }
+  });
+
+  it("prints no endorsement on a composition dealer's bill of supply", () => {
+    const html = createInvoiceHtml(
+      gstRecord({
+        taxTreatment: "composition",
+        documentType: "bill_of_supply",
+        supplyKind: "export",
+        countryOfDestination: "Germany",
+        recipientIsOutsideIndia: true,
+        withPaymentOfTax: false,
+      })
+    );
+    expect(html).not.toContain("SUPPLY MEANT FOR EXPORT");
+  });
+
+  it("keeps the endorsement out of a pre-Phase-2 record's CSV as well", () => {
+    const csv = createInvoiceCsv(
+      makeRecord({ withPaymentOfTax: true, countryOfDestination: "France" })
+    );
+    expect(csv).not.toContain("SUPPLY MEANT FOR EXPORT");
+  });
+
   it("carries the endorsement into the CSV, neutralized like every other cell", () => {
     const csv = createInvoiceCsv(
       gstRecord({ supplyKind: "sez", recipientIsSez: true, withPaymentOfTax: false })
@@ -268,8 +318,41 @@ describe("createInvoiceCsv — line-item cells stay numeric", () => {
     // The CSV shares its column list with the HTML but not its formatting: a
     // cell holding "₹50,000.00" is a string and will not add up.
     const csv = createInvoiceCsv(gstRecord());
-    expect(csv).toContain('"1","Consulting","998314","HRS","1","1000.00","18"');
+    expect(csv).toContain(
+      '"1","Consulting","998314","HRS","1","1000.00","1000.00","18","180.00","1000.00"'
+    );
     expect(csv).not.toContain("₹1,000.00");
+  });
+
+  /**
+   * Rule 46(j). The row used to read `Rate 18 | Tax 174.24 | Amount 1000.00`,
+   * and 18% of 1,000 is 180 — the document contradicted itself in front of
+   * whoever checked it. The taxable value is the number the tax was charged on,
+   * so the three columns now reconcile exactly.
+   */
+  it("prints a taxable value the rate and the tax reconcile against", () => {
+    const csv = createInvoiceCsv(gstRecord({ discount: 32 }));
+    const line = csv
+      .split("\n")
+      .find((row) => row.startsWith('"1","Consulting"'));
+    expect(line).toBeDefined();
+    const cells = (line as string)
+      .split('","')
+      .map((cell) => cell.replace(/"/g, ""));
+    // "#","Description","HSN/SAC","UOM","Qty","Unit Price","Taxable Value","Rate","Tax","Amount"
+    const taxable = Number(cells[6]);
+    const rate = Number(cells[7]);
+    const tax = Number(cells[8]);
+    const amount = Number(cells[9]);
+    expect(taxable).toBe(968);
+    expect(amount).toBe(1000);
+    expect(Number(((taxable * rate) / 100).toFixed(2))).toBe(tax);
+  });
+
+  it("labels the column Taxable Value in the HTML table too", () => {
+    const html = createInvoiceHtml(gstRecord({ discount: 32 }));
+    expect(html).toContain("Taxable Value");
+    expect(html).toContain("₹968.00");
   });
 });
 
@@ -293,7 +376,7 @@ describe("buildLineItemColumns — a column only exists when a line fills it", (
     ]);
   });
 
-  it("adds HSN/SAC, UOM, rate and tax for a taxed GST line", () => {
+  it("adds HSN/SAC, UOM, taxable value, rate and tax for a taxed GST line", () => {
     expect(columnsFor(gstRecord())).toEqual([
       "index",
       "description",
@@ -301,6 +384,7 @@ describe("buildLineItemColumns — a column only exists when a line fills it", (
       "unit",
       "quantity",
       "unitPrice",
+      "taxable",
       "taxRate",
       "tax",
       "amount",

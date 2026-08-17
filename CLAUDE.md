@@ -20,6 +20,7 @@ One-off data migrations, run manually against the configured `MONGODB_URI`:
 bun run migrate:provider-ids   # providerId (string) -> providerIds (array)
 bun run migrate:tax-to-gst     # tax -> cgst/sgst
 bun run migrate:purge-tokens   # $unset User.accessToken / User.refreshToken
+bun run migrate:invoice-numbering  # backfill financialYear/invoiceNumberKey; reports duplicates
 ```
 
 The first two preserve the legacy field rather than dropping it, so legacy and current document shapes coexist in production data. `migrate:purge-tokens` is deliberately the opposite — the fields held Firebase ID and refresh tokens (the latter never expires), so destroying them is the entire point. It needs `strict: false` on the update because the paths no longer exist in the schema.
@@ -54,6 +55,12 @@ Formula: `subtotal - discount + cgst + sgst + convenienceCharge`, clamped at 0, 
 
 `convenienceCharge` is labeled "Service Charge" in all user-facing output.
 
+`buildLineItemColumns` includes a **Taxable Value** column (Rule 46(j)) whenever
+tax is charged or a discount moved a line's taxable value off its gross — without
+it the printed row read `Rate 18 | Tax 174.00 | Amount 1000.00`, where Amount is
+the GROSS, and the table did not reconcile. `Amount` stays gross; rate × taxable
+= tax exactly.
+
 ### Numeric fields are text inputs
 
 Every number in the editor (Qty, Unit price, Discount, Service Charge, CGST,
@@ -86,6 +93,54 @@ mid-typing.
 Writes use `cgst` + `sgst`. Read paths keep `?? tax` fallbacks ([lib/invoices.ts:220](lib/invoices.ts:220) for the form mapper, and `resolveRecordAmounts` in `lib/invoice-domain.ts` for the exporters) — load-bearing because the migration intentionally leaves `tax` in the database. Percent-vs-amount is UI-only state in `InvoiceEditor`; only the resolved amount is persisted, so an edited invoice always reopens in amount mode.
 
 The AI prompt now advertises `cgst`/`sgst` (matching `normalization.ts`/`apply-patch.ts`), and a prompt rule tells the model to split a single "tax" request evenly across CGST and SGST. Keep the field set identical across `prompt.ts`, `contracts.ts`, `normalization.ts`, and `apply-patch.ts`.
+
+### Invoice numbering is enforced (Rule 46(b))
+
+`lib/invoice-number.ts` is the pure module; it is now wired everywhere that
+matters. The number is **not** generated in the browser any more — the old
+`INV-${Date.now().toString().slice(-6)}` cycled every 16m40s.
+`createDefaultInvoiceFormState` leaves it blank and `InvoiceEditor` seeds it from
+`GET /api/invoices?suggest_number=1&date=…` in the same effect that fetches the
+profile (one effect, one `setInvoice`, so the two cannot race on the same field).
+
+`validateInvoice` runs `checkInvoiceNumber` and returns the specific rule broken.
+`normalizePayload` stores `financialYear` (from the invoice DATE, IST civil date)
+and `invoiceNumberKey` (whitespace-stripped, upper-cased); neither is ever read
+from the request. `models/Invoice.ts` carries a **full** unique index
+`{ userId, financialYear, invoiceNumberKey }` — not partial, because nothing is
+hard-deleted and a soft-deleted number must stay spent. E11000 becomes a 409
+naming the number, the year and the next free number. The suggester counts
+soft-deleted rows for the same reason.
+
+**Before that index can exist in production**: `bun run migrate:invoice-numbering`
+backfills both fields and REPORTS duplicates instead of renumbering (renumbering
+changes a document the client already holds — the only irreversible act here).
+
+### Registration status gates the GST language
+
+`exportEndorsementFor` and the LUT-ARN validation rule are both gated on
+`taxTreatment === "gst"`. An unregistered supplier exporting services issues a
+plain INVOICE: no Rule 46 endorsement, no LUT prompt, no tax rows. Both
+endorsements are declarations made under a registration, so printing either over
+a document with no GSTIN on it is a false statement. Same for composition.
+
+### The legacy tax arm belongs to legacy RECORDS
+
+An absent `taxTreatment` puts `computeTotals` on the legacy arm, where the
+invoice-level `cgst`/`sgst` are taken from the client verbatim. That is only
+legitimate for a document written before Phase 2, so "is this legacy?" is
+answered from the STORED DOCUMENT, never from the request: POST always requires
+`taxTreatment`, and PUT accepts its absence only when the record being updated
+has none of its own.
+
+### Line rates are whitelisted at validation, not dropped
+
+A `taxRatePercent` that is not a GST slab used to be silently omitted by the
+API's `normalizeItems`, saving an untaxed invoice under a preview that had shown
+the tax. The rate is now carried through and `validateInvoice` rejects it
+(`UNKNOWN_GST_RATE_ERROR`). Retired slabs (12, 28) still pass, with a warning.
+The AI normalizer still DROPS what it cannot accept — untrusted model output is
+a different concern from a user's own input.
 
 ### Nothing is ever hard-deleted
 

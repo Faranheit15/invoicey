@@ -12,6 +12,7 @@
     "migrate:provider-ids": "bun scripts/migrate-provider-ids.ts",
     "migrate:tax-to-gst": "bun scripts/migrate-tax-to-gst.ts",
     "migrate:purge-tokens": "bun scripts/purge-user-tokens.ts",
+    "migrate:invoice-numbering": "bun scripts/migrate-invoice-numbering.ts",
     "audit:orphan-invoices": "bun scripts/audit-orphan-invoices.ts",
     "backfill:user-role": "bun scripts/backfill-user-role-status.ts",
     "backup:db": "bun scripts/backup-to-r2.ts",

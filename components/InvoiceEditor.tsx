@@ -38,6 +38,7 @@ import { useUnsavedChangesGuard } from "@/lib/hooks/use-unsaved-changes";
 import { UNSAVED_CHANGES_MESSAGE } from "@/lib/navigation-guard";
 import UserSessionManager from "@/modules/UserSessionManager";
 import { buildDuplicateFormState } from "@/lib/invoice-duplicate";
+import { MAX_INVOICE_NUMBER_LENGTH } from "@/lib/invoice-number";
 import type { InvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/contracts";
 import { applyInvoiceAssistantPatch } from "@/lib/ai/invoice-assistant/apply-patch";
 import {
@@ -120,7 +121,11 @@ interface InvoiceEditorProps {
 // accept — and to keep the preview and the printed sheet legible. The numeric
 // ceilings live in lib/invoice-domain so the API enforces the same ones.
 const TEXT_FIELD_MAX = 120;
-const INVOICE_NUMBER_MAX = 40;
+// Rule 46(b) caps the invoice number at 16 characters, so the field does too —
+// a field that lets someone type 40 and then refuses to save is a worse way to
+// state a legal limit than one they cannot exceed. The charset is not enforced
+// per keystroke (that would swallow a paste); `validateInvoice` names the rule.
+const INVOICE_NUMBER_MAX = MAX_INVOICE_NUMBER_LENGTH;
 const ADDRESS_FIELD_MAX = 400;
 const NOTES_FIELD_MAX = 1000;
 const URL_FIELD_MAX = 2048;
@@ -375,9 +380,13 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   const documentType = invoice.taxTreatment
     ? documentTypeFor(invoice.taxTreatment)
     : "invoice";
+  // `taxTreatment` goes in because the endorsement is a statement made under a
+  // GST registration: an unregistered exporter's document carries none. The
+  // preview must agree with the printed document, and both read this function.
   const endorsement = exportEndorsementFor({
     supplyKind,
     withPaymentOfTax: invoice.withPaymentOfTax,
+    taxTreatment: invoice.taxTreatment,
   });
 
   /** Validation and other failures the user must fix themselves: no retry. */
@@ -538,38 +547,62 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
   // not be relaxed.
 
   /**
-   * Seed a NEW invoice from the saved business profile.
+   * Seed a NEW invoice from the saved business profile AND from the next number
+   * in the user's series.
    *
-   * Gated on `isPristineRef`: this fetch is async, the form is usable the
+   * Both in one effect, resolved together, because both end in the same
+   * `setInvoice`: two effects racing on it would have the loser overwrite the
+   * winner's field, and which one that is would depend on network timing.
+   * `allSettled`, so a failing profile still yields a number and vice versa.
+   *
+   * Gated on `isPristineRef`: these fetches are async, the form is usable the
    * instant it renders, and a seed that landed on top of typed values would
-   * destroy work. It also runs in edit mode (without seeding) because the
-   * profile carries the GSTIN that the supplier-state validation rule needs.
+   * destroy work. The profile is fetched in edit mode too (without seeding)
+   * because it carries the GSTIN that the supplier-state validation rule needs.
    *
    * A failure is swallowed. Seeding is a convenience; "nothing between sign-in
-   * and the first invoice" means a profile the server could not return must not
-   * stop anyone creating one.
+   * and the first invoice" means neither a profile nor a number the server
+   * could not return must stop anyone creating an invoice — the number field is
+   * simply left blank, and validation asks for it at save time.
    */
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
-      try {
-        const { profile: saved } = await profileApi.get();
-        if (cancelled) {
-          return;
-        }
+      const [profileOutcome, numberOutcome] = await Promise.allSettled([
+        profileApi.get(),
+        mode === "create"
+          ? invoicesApi.suggestNumber(new Date().toISOString().split("T")[0])
+          : Promise.resolve(null),
+      ]);
+      if (cancelled) {
+        return;
+      }
+
+      const saved =
+        profileOutcome.status === "fulfilled" ? profileOutcome.value.profile : null;
+      if (saved) {
         setProfile(saved);
-        if (
-          mode === "create" &&
-          isPristineRef.current &&
-          // A `?duplicate=` copy is in flight (or has landed): seeding here
-          // would blank the client and line items it just carried over.
-          !isDuplicatePendingRef.current
-        ) {
-          setInvoice(createDefaultInvoiceFormState(profileToSeed(saved)));
-        }
-      } catch {
-        // Intentionally silent — see above.
+      }
+
+      if (
+        mode === "create" &&
+        isPristineRef.current &&
+        // A `?duplicate=` copy is in flight (or has landed): seeding here
+        // would blank the client and line items it just carried over, and it
+        // has already asked for a number of its own.
+        !isDuplicatePendingRef.current
+      ) {
+        const suggested =
+          numberOutcome.status === "fulfilled" && numberOutcome.value
+            ? (numberOutcome.value.invoiceNumber ?? "")
+            : "";
+        setInvoice(
+          createDefaultInvoiceFormState({
+            ...profileToSeed(saved),
+            invoiceNumber: suggested,
+          })
+        );
       }
     })();
 
@@ -922,6 +955,11 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
             <SelectField
               {...field}
               aria-labelledby={`${labelId} ${field.id}`}
+              // A rate that is not a slab is now a blocking error rather than a
+              // silent drop, so the row it belongs to has to be reachable.
+              data-invoice-field={
+                isStamped ? `items.${index}.taxRatePercent` : undefined
+              }
               value={
                 item.taxRatePercent === undefined
                   ? ""
@@ -1399,7 +1437,7 @@ export default function InvoiceEditor({ mode, invoiceId }: InvoiceEditorProps) {
                         {...field}
                         data-invoice-field="invoiceNumber"
                         maxLength={INVOICE_NUMBER_MAX}
-                        placeholder="INV-2026-014"
+                        placeholder="INV/2026-27/001"
                         value={invoice.invoiceNumber}
                         onChange={(event) =>
                           updateField("invoiceNumber", event.target.value)

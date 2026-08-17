@@ -176,6 +176,9 @@ describe("InvoiceModal line items", () => {
       "unit",
       "quantity",
       "unitPrice",
+      // Rule 46(j) — the modal is the last screen before the document is sent,
+      // so it shows the same taxable value the printed sheet does.
+      "taxable",
       "taxRate",
       "tax",
       "amount",
@@ -192,6 +195,7 @@ describe("InvoiceModal line items", () => {
       "998314",
       "HRS",
       "1",
+      formatCurrency(10_000, "INR"),
       formatCurrency(10_000, "INR"),
       "18%",
       formatCurrency(1_800, "INR"),

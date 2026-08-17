@@ -126,14 +126,53 @@ describe("collectInvoiceIssues — reporting every field at once", () => {
     expect(report.issues[0].itemIndex).toBe(1);
   });
 
-  it("reports export country and LUT ARN together", () => {
+  it("reports export country and LUT ARN together for a REGISTERED exporter", () => {
     const invoice = valid({
+      taxTreatment: "gst",
+      supplierStateCode: "27",
+      placeOfSupplyStateCode: "96",
+      companyGstin: "27AAPFU0939F1ZV",
       supplyKind: "export",
       countryOfDestination: "",
       withPaymentOfTax: false,
       lutArn: "",
     });
     expect(fields(invoice)).toEqual(["countryOfDestination", "lutArn"]);
+  });
+
+  // §1.2: an unregistered exporter is asked for the destination country and
+  // nothing else. The LUT prompt was a dead end for them — see the validator.
+  it("asks an UNREGISTERED exporter for the country and not for an LUT", () => {
+    const invoice = valid({
+      taxTreatment: "none",
+      supplyKind: "export",
+      countryOfDestination: "",
+      withPaymentOfTax: false,
+      lutArn: "",
+    });
+    expect(fields(invoice)).toEqual(["countryOfDestination"]);
+  });
+
+  it("points at the line carrying a rate GST does not have", () => {
+    const invoice = valid({
+      items: [
+        { description: "Consulting", taxRatePercent: 18, hsnSac: "998314" },
+        { description: "Support", taxRatePercent: 15 },
+      ],
+    });
+    const report = collectInvoiceIssues(invoice);
+    expect(report.issues).toHaveLength(1);
+    expect(report.issues[0].field).toBe("items.1.taxRatePercent");
+    expect(report.issues[0].itemIndex).toBe(1);
+  });
+
+  it("focuses the number field for a Rule 46(b) charset break", () => {
+    expect(fields(valid({ invoiceNumber: "INV#001" }))).toEqual([
+      "invoiceNumber",
+    ]);
+    expect(fields(valid({ invoiceNumber: "INVOICE/2026-27/0001" }))).toEqual([
+      "invoiceNumber",
+    ]);
   });
 
   it("gives the state-mismatch error a control to focus", () => {
@@ -250,11 +289,18 @@ describe("collectInvoiceIssues — the repair loop itself", () => {
       }),
       valid({ supplyKind: "export", countryOfDestination: "" }),
       valid({
+        taxTreatment: "gst",
+        supplierStateCode: "27",
+        placeOfSupplyStateCode: "96",
+        companyGstin: "27AAPFU0939F1ZV",
         supplyKind: "export",
         countryOfDestination: "US",
         withPaymentOfTax: false,
         lutArn: "",
       }),
+      valid({ invoiceNumber: "INV#001" }),
+      valid({ invoiceNumber: "INVOICE/2026-27/0001" }),
+      valid({ items: [{ description: "x", taxRatePercent: 15 }] }),
     ];
     for (const invoice of withField) {
       const issues = collectInvoiceIssues(invoice).issues;

@@ -17,6 +17,20 @@ export interface IInvoice extends Document {
   billToEmail?: string;
   billToAddress?: string;
   invoiceNumber: string;
+  /**
+   * Rule 46(b) uniqueness scope: "2026-27", derived server-side from
+   * `invoiceDate` (as a civil date, never a local one). Optional because every
+   * document written before invoice numbering was enforced has neither this nor
+   * `invoiceNumberKey`; the migration backfills both.
+   */
+  financialYear?: string;
+  /**
+   * `invoiceNumber` with whitespace removed and folded to upper case — the
+   * value the unique index is built on, so `inv/2026-27/001` and
+   * `INV/2026-27/001` cannot both exist. Server-derived; never accepted from a
+   * request, and never printed (the document shows `invoiceNumber` as typed).
+   */
+  invoiceNumberKey?: string;
   invoiceDate: Date;
   dueDate: Date;
   terms?: string;
@@ -110,6 +124,11 @@ const InvoiceSchema: Schema = new Schema({
   billToEmail: { type: String, default: "" },
   billToAddress: { type: String, default: "" },
   invoiceNumber: { type: String, required: true },
+  // Both derived in `normalizePayload`, never read from the request. No
+  // defaults: absence is what a pre-enforcement document looks like, and the
+  // migration is what turns that absence into a value.
+  financialYear: { type: String },
+  invoiceNumberKey: { type: String },
   invoiceDate: { type: Date, required: true },
   dueDate: { type: Date, required: true },
   terms: { type: String, default: "" },
@@ -210,6 +229,36 @@ InvoiceSchema.index({ userId: 1, is_deleted: 1, createdAt: -1 });
 // the background off-hours on an existing collection (see note above).
 InvoiceSchema.index({ is_deleted: 1, createdAt: -1 }); // global recent list + invoices-over-time
 InvoiceSchema.index({ is_deleted: 1, status: 1, currency: 1 }); // status breakdown + revenue-by-currency
+
+/**
+ * Rule 46(b): an invoice number is unique for a financial year. This index is
+ * the only thing that actually guarantees it — validation runs per request and
+ * two concurrent saves can pass it both.
+ *
+ * FULL, NOT PARTIAL, and this is the decision to preserve. A partial index
+ * filtered on `{ is_deleted: { $ne: true } }` would let a user soft-delete
+ * INV/2026-27/007 and issue a second, different INV/2026-27/007 — and because
+ * nothing here is ever hard-deleted, both documents are retained side by side
+ * for the 72 months §36 requires, sharing one serial. That is the audit finding
+ * this index exists to prevent, so a soft-deleted number stays spent. The cost
+ * is that a mistyped draft's number cannot be reused; the suggestion endpoint
+ * skips past it, and it is visibly parked rather than silently reissued.
+ *
+ * `documentType` is deliberately NOT in the key. There is one series today, and
+ * adding a field whose values are `undefined` on every legacy row would widen
+ * the key with a null that carries no meaning. A future proforma/credit-note
+ * series is a new index at the point it exists.
+ *
+ * ORDER OF DEPLOYMENT MATTERS: every legacy document is missing both fields, so
+ * they all index as (null, null) and a unique build fails immediately. Run
+ * `bun run migrate:invoice-numbering` first (it backfills and REPORTS duplicates
+ * rather than renumbering), resolve what it reports, then build this in the
+ * background off-hours.
+ */
+InvoiceSchema.index(
+  { userId: 1, financialYear: 1, invoiceNumberKey: 1 },
+  { unique: true, name: "uniq_user_fy_invoice_number" }
+);
 
 export default mongoose.models.Invoice ||
   mongoose.model<IInvoice>("Invoice", InvoiceSchema);

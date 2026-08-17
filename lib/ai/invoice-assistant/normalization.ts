@@ -15,6 +15,10 @@ import {
   isValidGstin,
   normalizeGstin,
 } from "@/lib/gstin";
+import {
+  isValidInvoiceNumber,
+  normalizeInvoiceNumber,
+} from "@/lib/invoice-number";
 import type {
   InvoiceAssistantPatch,
   InvoiceAssistantResponse,
@@ -233,7 +237,6 @@ const buildPatch = (rawPatch: unknown): InvoiceAssistantPatch => {
       "billTo",
       "billToEmail",
       "billToAddress",
-      "invoiceNumber",
       "terms",
       "notes",
       "paymentInfo",
@@ -244,6 +247,21 @@ const buildPatch = (rawPatch: unknown): InvoiceAssistantPatch => {
     if (value) {
       patch[fieldKey] = value;
     }
+  }
+
+  /**
+   * The invoice number is handled apart from the other string fields because it
+   * is the one with a statutory format. Rule 46(b) allows 16 characters of
+   * letters, digits, `-` and `/`; a model that returns "INV #2026/0001" would
+   * otherwise land it in form state and block the save it was meant to speed
+   * up. DROPPED rather than corrected — the draft already carries the number
+   * the server suggested, and an invented one is worse than none.
+   */
+  const suggestedNumber = normalizeInvoiceNumber(
+    toTrimmedString(patchObject.invoiceNumber)
+  );
+  if (suggestedNumber && isValidInvoiceNumber(suggestedNumber)) {
+    patch.invoiceNumber = suggestedNumber;
   }
 
   const invoiceDate = normalizeDateInput(patchObject.invoiceDate);
